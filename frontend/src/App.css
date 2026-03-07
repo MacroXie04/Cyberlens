@@ -1,0 +1,163 @@
+/* Global Styles — Material You Dark Theme */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  font-family: var(--md-font-body);
+  background-color: var(--md-surface);
+  color: var(--md-on-surface);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Card Component */
+.card {
+  background: var(--md-surface-container);
+  border-radius: var(--md-radius-card);
+  border: 1px solid var(--md-outline-variant);
+  padding: 24px;
+  transition: background-color 0.2s ease;
+}
+
+.card:hover {
+  background: var(--md-surface-container-high);
+}
+
+/* Tab Navigation */
+.tabs {
+  display: flex;
+  gap: 8px;
+  padding: 4px;
+  background: var(--md-surface-container);
+  border-radius: var(--md-radius-chip);
+  width: fit-content;
+}
+
+.tab {
+  padding: 10px 24px;
+  border: none;
+  border-radius: 16px;
+  background: transparent;
+  color: var(--md-on-surface-variant);
+  font-family: var(--md-font-body);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tab.active {
+  background: var(--md-primary);
+  color: var(--md-on-primary);
+}
+
+/* Threat Level Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: var(--md-radius-chip);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.badge--safe {
+  background: rgba(129, 199, 132, 0.15);
+  color: var(--md-safe);
+}
+
+.badge--suspicious {
+  background: rgba(255, 213, 79, 0.15);
+  color: var(--md-warning);
+}
+
+.badge--malicious {
+  background: rgba(239, 83, 80, 0.15);
+  color: var(--md-error);
+  animation: blink 1.2s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* Scan-line effect for live stream */
+.scan-line {
+  position: relative;
+  overflow: hidden;
+}
+
+.scan-line::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--md-primary),
+    transparent
+  );
+  animation: scan 3s linear infinite;
+}
+
+@keyframes scan {
+  0% { top: 0; }
+  100% { top: 100%; }
+}
+
+/* Monospace text for technical data */
+.mono {
+  font-family: var(--md-font-mono);
+  font-size: 13px;
+}
+
+/* Stagger animation for card entry */
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-in {
+  animation: slideInUp 0.4s ease-out forwards;
+}
+
+/* Grid Layout */
+.dashboard-grid {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--md-outline-variant);
+  border-radius: 3px;
+}
