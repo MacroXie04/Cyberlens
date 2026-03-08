@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from django.urls import reverse_lazy
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,6 +14,7 @@ DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() in ("true", "1", "yes")
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
 INSTALLED_APPS = [
+    "unfold",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -21,6 +23,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "corsheaders",
+    "accounts",
     "monitor",
     "scanner",
 ]
@@ -109,9 +112,16 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # CORS
 CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+CORS_ALLOW_CREDENTIALS = True
 
 # REST Framework
 REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
 }
@@ -139,5 +149,98 @@ NGINX_LOG_PATH = os.getenv("NGINX_LOG_PATH", "/var/log/nginx/access.json")
 # Google Gemini / ADK
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
-# Local scan mount point (inside container)
-LOCAL_SCAN_ROOT = "/scan-targets"
+# django-unfold admin
+UNFOLD = {
+    "SITE_TITLE": "CyberLens",
+    "SITE_HEADER": "CyberLens",
+    "SITE_SUBHEADER": "Security Dashboard",
+    "SITE_SYMBOL": "security",
+    "SHOW_HISTORY": True,
+    "SHOW_VIEW_ON_SITE": False,
+    "SIDEBAR": {
+        "show_search": True,
+        "navigation": [
+            {
+                "title": "Monitoring",
+                "separator": True,
+                "collapsible": False,
+                "items": [
+                    {
+                        "title": "HTTP Requests",
+                        "icon": "http",
+                        "link": reverse_lazy("admin:monitor_httprequest_changelist"),
+                    },
+                    {
+                        "title": "Analysis Results",
+                        "icon": "query_stats",
+                        "link": reverse_lazy("admin:monitor_analysisresult_changelist"),
+                    },
+                    {
+                        "title": "Alerts",
+                        "icon": "notifications_active",
+                        "link": reverse_lazy("admin:monitor_alert_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "Scanner",
+                "separator": True,
+                "collapsible": False,
+                "items": [
+                    {
+                        "title": "Scans",
+                        "icon": "radar",
+                        "link": reverse_lazy("admin:scanner_githubscan_changelist"),
+                    },
+                    {
+                        "title": "Dependencies",
+                        "icon": "package_2",
+                        "link": reverse_lazy("admin:scanner_dependency_changelist"),
+                    },
+                    {
+                        "title": "Vulnerabilities",
+                        "icon": "bug_report",
+                        "link": reverse_lazy("admin:scanner_vulnerability_changelist"),
+                    },
+                    {
+                        "title": "AI Reports",
+                        "icon": "smart_toy",
+                        "link": reverse_lazy("admin:scanner_aireport_changelist"),
+                    },
+                    {
+                        "title": "Code Findings",
+                        "icon": "code",
+                        "link": reverse_lazy("admin:scanner_codefinding_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "Accounts",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Users",
+                        "icon": "person",
+                        "link": reverse_lazy("admin:auth_user_changelist"),
+                    },
+                    {
+                        "title": "Groups",
+                        "icon": "group",
+                        "link": reverse_lazy("admin:auth_group_changelist"),
+                    },
+                    {
+                        "title": "User Settings",
+                        "icon": "settings",
+                        "link": reverse_lazy("admin:accounts_usersettings_changelist"),
+                    },
+                    {
+                        "title": "Gemini Logs",
+                        "icon": "token",
+                        "link": reverse_lazy("admin:accounts_geminilog_changelist"),
+                    },
+                ],
+            },
+        ],
+    },
+}

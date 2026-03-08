@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
-import { updateSettings, testApiKey, getRepos } from "../services/api";
+import { updateSettings, testApiKey, getRepos, getAvailableModels } from "../services/api";
 import type { GitHubUser, GitHubRepo, SelectedProject } from "../types";
 import GitHubConnect from "../components/SupplyChain/GitHubConnect";
-import LocalProjectSelect from "../components/SupplyChain/LocalProjectSelect";
 import CloudRunConnect from "../components/Settings/CloudRunConnect";
+import GcpLoggingConfig from "../components/Settings/GcpLoggingConfig";
 
 interface Props {
   user: GitHubUser | null;
@@ -14,6 +14,8 @@ interface Props {
   adkKeySet: boolean;
   adkKeyPreview: string;
   onAdkKeyChange: (keySet: boolean, preview: string) => void;
+  geminiModel: string;
+  onModelChange: (model: string) => void;
   cloudRunUrl: string | null;
   onCloudRunConnect: (url: string) => void;
   onCloudRunDisconnect: () => void;
@@ -28,6 +30,8 @@ export default function SettingsPage({
   adkKeySet: keySet,
   adkKeyPreview: keyPreview,
   onAdkKeyChange,
+  geminiModel,
+  onModelChange,
   cloudRunUrl,
   onCloudRunConnect,
   onCloudRunDisconnect,
@@ -36,12 +40,23 @@ export default function SettingsPage({
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [modelLoading, setModelLoading] = useState(false);
 
-  // Project source state
-  const [scanMode, setScanMode] = useState<"github" | "local">(
-    selectedProject?.mode ?? "github"
-  );
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
+
+  // Fetch available Gemini models when API key is set
+  useEffect(() => {
+    if (keySet) {
+      setModelLoading(true);
+      getAvailableModels()
+        .then((data) => setAvailableModels(data.models))
+        .catch(() => {})
+        .finally(() => setModelLoading(false));
+    } else {
+      setAvailableModels([]);
+    }
+  }, [keySet]);
 
   // Fetch repos when user connects
   useEffect(() => {
@@ -57,7 +72,7 @@ export default function SettingsPage({
     setSaving(true);
     setMessage(null);
     try {
-      const data = await updateSettings(inputKey.trim());
+      const data = await updateSettings({ google_api_key: inputKey.trim() });
       onAdkKeyChange(data.google_api_key_set, data.google_api_key_preview);
       setInputKey("");
       setMessage({ text: "Google ADK key saved successfully", error: false });
@@ -68,6 +83,15 @@ export default function SettingsPage({
       });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleModelChange(newModel: string) {
+    try {
+      await updateSettings({ gemini_model: newModel });
+      onModelChange(newModel);
+    } catch {
+      // ignore
     }
   }
 
@@ -101,11 +125,6 @@ export default function SettingsPage({
   function handleGitHubDisconnect() {
     onDisconnect();
     setRepos([]);
-  }
-
-  function handleSelectLocal(path: string) {
-    const name = path.split("/").pop() || path;
-    onSelectProject({ mode: "local", path, name });
   }
 
   return (
@@ -148,6 +167,32 @@ export default function SettingsPage({
           onConnect={onCloudRunConnect}
           onDisconnect={onCloudRunDisconnect}
         />
+      </div>
+
+      {/* GCP Cloud Logging */}
+      <div className="card">
+        <h3
+          style={{
+            fontSize: 16,
+            fontWeight: 500,
+            color: "var(--md-on-surface)",
+            marginBottom: 4,
+          }}
+        >
+          GCP Cloud Logging
+        </h3>
+        <p
+          style={{
+            fontSize: 13,
+            color: "var(--md-on-surface-variant)",
+            marginBottom: 16,
+          }}
+        >
+          Connect to Google Cloud Logging to view Cloud Run service logs in the
+          Live Monitor tab. Requires a service account with{" "}
+          <code>roles/logging.viewer</code>.
+        </p>
+        <GcpLoggingConfig />
       </div>
 
       {/* Top Row: ADK Key + Project Source side by side */}
@@ -270,6 +315,46 @@ export default function SettingsPage({
             )}
           </div>
 
+          {/* Model selector */}
+          {keySet && (
+            <div style={{ marginTop: 16 }}>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: "var(--md-on-surface-variant)",
+                  marginBottom: 6,
+                }}
+              >
+                Gemini Model
+              </label>
+              <select
+                value={geminiModel}
+                onChange={(e) => handleModelChange(e.target.value)}
+                disabled={modelLoading}
+                style={{
+                  width: "100%",
+                  padding: "10px 14px",
+                  borderRadius: "var(--md-radius-button)",
+                  border: "1px solid var(--md-outline-variant)",
+                  background: "var(--md-surface-container-high)",
+                  color: "var(--md-on-surface)",
+                  fontSize: 14,
+                  outline: "none",
+                  cursor: modelLoading ? "wait" : "pointer",
+                }}
+              >
+                <option value="">Default (gemini-2.5-flash)</option>
+                {availableModels.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {message && (
             <div
               style={{
@@ -288,7 +373,7 @@ export default function SettingsPage({
           )}
         </div>
 
-        {/* Card 2: Project Source */}
+        {/* Card 2: GitHub Connection */}
         <div className="card">
           <h3
             style={{
@@ -298,53 +383,19 @@ export default function SettingsPage({
               marginBottom: 16,
             }}
           >
-            Project Source
+            GitHub Connection
           </h3>
 
-          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-            {(["github", "local"] as const).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => setScanMode(mode)}
-                style={{
-                  padding: "10px 24px",
-                  borderRadius: "var(--md-radius-button)",
-                  border: "none",
-                  background:
-                    scanMode === mode
-                      ? "var(--md-primary)"
-                      : "var(--md-surface-container-high)",
-                  color:
-                    scanMode === mode
-                      ? "var(--md-on-primary)"
-                      : "var(--md-on-surface-variant)",
-                  fontWeight: 500,
-                  fontSize: 14,
-                  cursor: "pointer",
-                }}
-              >
-                {mode === "github" ? "GitHub" : "Local"}
-              </button>
-            ))}
-          </div>
-
-          {scanMode === "github" ? (
-            <GitHubConnect
-              user={user}
-              onConnect={handleGitHubConnect}
-              onDisconnect={handleGitHubDisconnect}
-            />
-          ) : (
-            <LocalProjectSelect
-              onScan={handleSelectLocal}
-              scanning={false}
-            />
-          )}
+          <GitHubConnect
+            user={user}
+            onConnect={handleGitHubConnect}
+            onDisconnect={handleGitHubDisconnect}
+          />
         </div>
       </div>
 
       {/* Full-width: GitHub Repo Selection (when connected) */}
-      {scanMode === "github" && user && repos.length > 0 && (
+      {user && repos.length > 0 && (
         <div className="card">
           <h3
             style={{
@@ -493,20 +544,6 @@ export default function SettingsPage({
         </div>
       )}
 
-      {selectedProject?.mode === "local" && (
-        <div
-          style={{
-            padding: "12px 16px",
-            background: "rgba(129, 199, 132, 0.1)",
-            borderRadius: 12,
-            fontSize: 13,
-            color: "var(--md-safe)",
-          }}
-        >
-          Selected: <strong>{selectedProject.name}</strong> (Local)
-          {" — "}Go to the <strong>Code Scan</strong> tab to view scan results.
-        </div>
-      )}
     </div>
   );
 }

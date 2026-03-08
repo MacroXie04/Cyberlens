@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 
@@ -12,6 +13,13 @@ class GitHubScan(models.Model):
         GITHUB = "github", "GitHub"
         LOCAL = "local", "Local"
 
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="scans",
+    )
     repo_name = models.CharField(max_length=255)
     repo_url = models.CharField(max_length=500)
     scan_source = models.CharField(
@@ -23,6 +31,11 @@ class GitHubScan(models.Model):
     total_deps = models.IntegerField(default=0)
     vulnerable_deps = models.IntegerField(default=0)
     security_score = models.IntegerField(default=100)
+    code_scan_input_tokens = models.IntegerField(default=0)
+    code_scan_output_tokens = models.IntegerField(default=0)
+    code_scan_total_tokens = models.IntegerField(default=0)
+    code_scan_files_scanned = models.IntegerField(default=0)
+    code_scan_files_total = models.IntegerField(default=0)
     scanned_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

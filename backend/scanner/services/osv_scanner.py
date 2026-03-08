@@ -1,13 +1,15 @@
 import logging
+
 import requests
-from scanner.models import GitHubScan, Dependency, Vulnerability
-from .github_client import get_dependency_files
-from .local_client import get_local_dependency_files
-from .dependency_parser import parse_dependencies
-from .ai_reporter import generate_report
-from .code_scanner import scan_code_security, scan_code_security_github
-from monitor.services.redis_publisher import publish_scan_progress, publish_scan_complete
 from celery import shared_task
+
+from monitor.services.redis_publisher import publish_scan_complete, publish_scan_progress
+from scanner.models import Dependency, GitHubScan, Vulnerability
+
+from .ai_reporter import generate_report
+from .code_scanner import scan_code_security_github
+from .dependency_parser import parse_dependencies
+from .github_client import get_dependency_files
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +46,8 @@ def query_osv(deps: list[dict]) -> list[dict]:
         return []
 
 
-def _run_scan_pipeline(scan_id: int, dep_files: dict[str, str], dir_path: str = "", pat: str = "", repo_full_name: str = ""):
-    """Shared scan pipeline: parse → OSV → AI report → code scan."""
+def _run_scan_pipeline(scan_id, dep_files, dir_path="", pat="", repo_full_name="", user_id=None):
+    """Scan pipeline: parse -> OSV -> AI report -> code scan."""
     scan = GitHubScan.objects.get(id=scan_id)
 
     if not dep_files:
@@ -102,7 +104,6 @@ def _run_scan_pipeline(scan_id: int, dep_files: dict[str, str], dir_path: str = 
                 if severity_items:
                     cvss = float(severity_items[0].get("score", 0))
 
-                # Try to find fixed version
                 fixed_version = ""
                 for affected in vuln.get("affected", []):
                     for r in affected.get("ranges", []):
@@ -125,15 +126,16 @@ def _run_scan_pipeline(scan_id: int, dep_files: dict[str, str], dir_path: str = 
 
     # Step 4: AI report
     publish_scan_progress({"scan_id": scan_id, "step": "analyzing", "message": "Generating AI risk assessment..."})
-    generate_report(scan)
+    generate_report(scan, user_id=user_id)
 
     # Step 5: Code security scan
     if dir_path:
+        from .code_scanner import scan_code_security  # noqa: E402
         publish_scan_progress({"scan_id": scan_id, "step": "code_scan", "message": "Scanning source code for security issues..."})
-        scan_code_security(scan_id, dir_path)
+        scan_code_security(scan_id, dir_path, user_id=user_id)
     elif pat and repo_full_name:
         publish_scan_progress({"scan_id": scan_id, "step": "code_scan", "message": "Scanning source code for security issues..."})
-        scan_code_security_github(scan_id, pat, repo_full_name)
+        scan_code_security_github(scan_id, pat, repo_full_name, user_id=user_id)
 
     scan.scan_status = "completed"
     scan.save()
@@ -142,13 +144,12 @@ def _run_scan_pipeline(scan_id: int, dep_files: dict[str, str], dir_path: str = 
 
 
 @shared_task
-def run_full_scan(scan_id: int, pat: str, repo_full_name: str):
+def run_full_scan(scan_id, pat, repo_full_name, user_id=None):
     """GitHub scan entry point."""
     try:
         publish_scan_progress({"scan_id": scan_id, "step": "fetching", "message": "Fetching dependency files from GitHub..."})
         dep_files = get_dependency_files(pat, repo_full_name)
-        _run_scan_pipeline(scan_id, dep_files, pat=pat, repo_full_name=repo_full_name)
-
+        _run_scan_pipeline(scan_id, dep_files, pat=pat, repo_full_name=repo_full_name, user_id=user_id)
     except Exception:
         logger.exception("Full scan failed for %s", repo_full_name)
         try:
@@ -160,14 +161,16 @@ def run_full_scan(scan_id: int, pat: str, repo_full_name: str):
         publish_scan_complete({"scan_id": scan_id, "status": "failed", "message": "Scan failed"})
 
 
+
+
 @shared_task
-def run_local_scan(scan_id: int, dir_path: str):
+def run_local_scan(scan_id, dir_path, user_id=None):
     """Local directory scan entry point."""
+    from .local_client import get_local_dependency_files  # noqa: E402
     try:
         publish_scan_progress({"scan_id": scan_id, "step": "fetching", "message": "Reading local dependency files..."})
         dep_files = get_local_dependency_files(dir_path)
-        _run_scan_pipeline(scan_id, dep_files, dir_path=dir_path)
-
+        _run_scan_pipeline(scan_id, dep_files, dir_path=dir_path, user_id=user_id)
     except Exception:
         logger.exception("Local scan failed for %s", dir_path)
         try:

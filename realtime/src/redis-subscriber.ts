@@ -7,6 +7,7 @@ const CHANNELS = [
   "cyberlens:stats_update",
   "cyberlens:scan_progress",
   "cyberlens:scan_complete",
+  "cyberlens:code_scan_stream",
 ];
 
 const CHANNEL_TO_EVENT: Record<string, string> = {
@@ -15,6 +16,7 @@ const CHANNEL_TO_EVENT: Record<string, string> = {
   "cyberlens:stats_update": "stats_update",
   "cyberlens:scan_progress": "scan_progress",
   "cyberlens:scan_complete": "scan_complete",
+  "cyberlens:code_scan_stream": "code_scan_stream",
 };
 
 export function startRedisSubscriber(io: Server): void {

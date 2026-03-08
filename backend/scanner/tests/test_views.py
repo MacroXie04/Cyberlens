@@ -1,24 +1,13 @@
 import pytest
 from unittest.mock import patch
-from django.test import override_settings
 from rest_framework.test import APIClient
 from scanner.models import GitHubScan, AiReport
 
 
 @pytest.fixture
-def api_client():
-    return APIClient()
-
-
-@pytest.fixture
-def authed_client(api_client):
-    """Client with a github_pat stored in session."""
-    session = api_client.session
-    session["github_pat"] = "ghp_testtoken123"
-    session.save()
-    # DRF APIClient doesn't auto-persist session cookies; use force_login workaround:
-    # Instead, set session via the connect endpoint with mocked validation.
-    return api_client
+def api_client(authenticated_client):
+    """Use authenticated client for all scanner tests."""
+    return authenticated_client
 
 
 @pytest.mark.django_db
@@ -88,7 +77,7 @@ class TestScan:
 @pytest.mark.django_db
 class TestScanDetail:
     def test_found(self, api_client, scan_factory):
-        scan = scan_factory()
+        scan = scan_factory(user=api_client._user)
         resp = api_client.get(f"/api/github/scan/{scan.id}/")
         assert resp.status_code == 200
         assert resp.data["repo_name"] == "owner/test-repo"
@@ -97,11 +86,17 @@ class TestScanDetail:
         resp = api_client.get("/api/github/scan/99999/")
         assert resp.status_code == 404
 
+    def test_cannot_view_other_users_scan(self, api_client, scan_factory, user_factory):
+        other_user = user_factory(username="other")
+        scan = scan_factory(user=other_user)
+        resp = api_client.get(f"/api/github/scan/{scan.id}/")
+        assert resp.status_code == 404
+
 
 @pytest.mark.django_db
 class TestAiReport:
     def test_found(self, api_client, scan_factory, ai_report_factory):
-        scan = scan_factory()
+        scan = scan_factory(user=api_client._user)
         ai_report_factory(scan, executive_summary="All clear")
         resp = api_client.get(f"/api/github/scan/{scan.id}/ai-report/")
         assert resp.status_code == 200
@@ -112,40 +107,15 @@ class TestAiReport:
         assert resp.status_code == 404
 
     def test_report_not_generated_yet(self, api_client, scan_factory):
-        """Exposes bug at views.py:132 - should use AiReport.DoesNotExist."""
-        scan = scan_factory()
-        # No AI report created for this scan
+        scan = scan_factory(user=api_client._user)
         resp = api_client.get(f"/api/github/scan/{scan.id}/ai-report/")
-        # The current code uses GitHubScan.ai_report.RelatedObjectDoesNotExist
-        # which is a valid Django pattern for OneToOneField reverse access.
-        # It should return 404.
         assert resp.status_code == 404
-
-
-@pytest.mark.django_db
-class TestLocalScan:
-    @patch("scanner.views.run_local_scan")
-    @patch("scanner.views.validate_local_path")
-    def test_success(self, mock_validate, mock_run, api_client):
-        mock_run.delay = lambda *a, **kw: None
-        resp = api_client.post("/api/github/local/scan/", {"path": "myproject"}, format="json")
-        assert resp.status_code == 202
-        assert GitHubScan.objects.count() == 1
-
-    def test_missing_path(self, api_client):
-        resp = api_client.post("/api/github/local/scan/", {}, format="json")
-        assert resp.status_code == 400
-
-    @patch("scanner.views.validate_local_path", side_effect=ValueError("Path traversal detected"))
-    def test_invalid_path(self, mock_validate, api_client):
-        resp = api_client.post("/api/github/local/scan/", {"path": "../../etc"}, format="json")
-        assert resp.status_code == 400
 
 
 @pytest.mark.django_db
 class TestCodeFindings:
     def test_found(self, api_client, scan_factory, code_finding_factory):
-        scan = scan_factory()
+        scan = scan_factory(user=api_client._user)
         code_finding_factory(scan, title="XSS found")
         resp = api_client.get(f"/api/github/scan/{scan.id}/code-findings/")
         assert resp.status_code == 200
@@ -155,3 +125,23 @@ class TestCodeFindings:
     def test_scan_not_found(self, api_client):
         resp = api_client.get("/api/github/scan/99999/code-findings/")
         assert resp.status_code == 404
+
+
+@pytest.mark.django_db
+class TestUnauthenticated:
+    """Verify that all endpoints reject unauthenticated requests."""
+
+    def test_github_status(self):
+        client = APIClient()
+        resp = client.get("/api/github/status/")
+        assert resp.status_code == 403
+
+    def test_connect(self):
+        client = APIClient()
+        resp = client.post("/api/github/connect/", {"token": "ghp_x"}, format="json")
+        assert resp.status_code == 403
+
+    def test_settings(self):
+        client = APIClient()
+        resp = client.get("/api/settings/")
+        assert resp.status_code == 403

@@ -1,3 +1,9 @@
+export interface AuthUser {
+  id: number;
+  username: string;
+  email: string;
+}
+
 export type ThreatLevel = "safe" | "suspicious" | "malicious";
 
 export type ThreatType =
@@ -68,12 +74,17 @@ export interface GitHubScan {
   id: number;
   repo_name: string;
   repo_url: string;
-  scan_source: "github" | "local";
+  scan_source: "github";
   scan_status: "pending" | "scanning" | "completed" | "failed";
   total_deps: number;
   vulnerable_deps: number;
   security_score: number;
   scanned_at: string;
+  code_scan_input_tokens: number;
+  code_scan_output_tokens: number;
+  code_scan_total_tokens: number;
+  code_scan_files_scanned: number;
+  code_scan_files_total: number;
   dependencies?: Dependency[];
   code_findings?: CodeFinding[];
 }
@@ -126,12 +137,6 @@ export interface CodeFinding {
   recommendation: string;
 }
 
-export interface LocalProject {
-  name: string;
-  path: string;
-  has_manifest: boolean;
-}
-
 export interface GitHubUser {
   login: string;
   avatar_url: string;
@@ -152,7 +157,47 @@ export interface GitHubRepo {
   html_url: string;
 }
 
+export interface CodeScanStreamEvent {
+  scan_id: number;
+  type:
+    | "scan_start"
+    | "file_start"
+    | "chunk"
+    | "file_complete"
+    | "file_error"
+    | "token_update"
+    | "scan_summary"
+    | "warning";
+  total_files?: number;
+  file_path?: string;
+  file_index?: number;
+  text?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  files_scanned?: number;
+  findings_count?: number;
+  total_findings?: number;
+  error?: string;
+  message?: string;
+}
+
+export interface CloudRunLogEntry {
+  timestamp: string | null;
+  severity: string;
+  message: string;
+  log_name: string;
+  trace: string;
+  labels: Record<string, string>;
+}
+
+export interface GcpSettings {
+  gcp_project_id: string;
+  gcp_service_name: string;
+  gcp_region: string;
+  gcp_service_account_key_set: boolean;
+}
+
 export type SelectedProject =
   | { mode: "github"; repo: GitHubRepo }
-  | { mode: "local"; path: string; name: string }
   | null;

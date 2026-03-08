@@ -66,7 +66,7 @@ class TestQueryOsv:
 
 @pytest.mark.django_db
 class TestRunScanPipeline:
-    @patch("scanner.services.osv_scanner.scan_code_security")
+    @patch("scanner.services.code_scanner.scan_code_security")
     @patch("scanner.services.osv_scanner.scan_code_security_github")
     @patch("scanner.services.osv_scanner.generate_report")
     @patch("scanner.services.osv_scanner.publish_scan_complete")
@@ -79,7 +79,7 @@ class TestRunScanPipeline:
         mock_complete.assert_called_once()
 
     @responses.activate
-    @patch("scanner.services.osv_scanner.scan_code_security")
+    @patch("scanner.services.code_scanner.scan_code_security")
     @patch("scanner.services.osv_scanner.scan_code_security_github")
     @patch("scanner.services.osv_scanner.generate_report")
     @patch("scanner.services.osv_scanner.publish_scan_complete")
@@ -101,7 +101,7 @@ class TestRunScanPipeline:
         assert Vulnerability.objects.filter(dependency__scan=scan).count() == 1
 
     @responses.activate
-    @patch("scanner.services.osv_scanner.scan_code_security")
+    @patch("scanner.services.code_scanner.scan_code_security")
     @patch("scanner.services.osv_scanner.scan_code_security_github")
     @patch("scanner.services.osv_scanner.generate_report")
     @patch("scanner.services.osv_scanner.publish_scan_complete")
@@ -136,7 +136,7 @@ class TestRunLocalScan:
     @patch("scanner.services.osv_scanner.publish_scan_complete")
     @patch("scanner.services.osv_scanner.publish_scan_progress")
     @patch("scanner.services.osv_scanner._run_scan_pipeline", side_effect=Exception("boom"))
-    @patch("scanner.services.osv_scanner.get_local_dependency_files")
+    @patch("scanner.services.local_client.get_local_dependency_files")
     def test_exception_sets_failed(self, mock_get_deps, mock_pipeline, mock_progress, mock_complete):
         scan = GitHubScan.objects.create(repo_name="local:myproj", repo_url="/scan-targets/myproj", scan_status="scanning")
         run_local_scan(scan.id, "/scan-targets/myproj")

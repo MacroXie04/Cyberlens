@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useSocket } from "../../hooks/useSocket";
-import type { SelectedProject } from "../../types";
+import type { AuthUser, SelectedProject } from "../../types";
 
 type Tab = "monitor" | "supply-chain" | "settings";
 
@@ -10,6 +10,8 @@ interface Props {
   selectedProject: SelectedProject;
   adkKeySet: boolean;
   cloudRunUrl?: string | null;
+  authUser?: AuthUser;
+  onLogout?: () => void;
   children: ReactNode;
 }
 
@@ -19,6 +21,8 @@ export default function DashboardLayout({
   selectedProject,
   adkKeySet,
   cloudRunUrl,
+  authUser,
+  onLogout,
   children,
 }: Props) {
   const { connected } = useSocket({}, cloudRunUrl);
@@ -141,6 +145,42 @@ export default function DashboardLayout({
             </div>
           )}
 
+          {/* Auth user + logout */}
+          {authUser && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "6px 12px",
+                background: "var(--md-surface-container)",
+                border: "1px solid var(--md-outline-variant)",
+                borderRadius: "var(--md-radius-chip)",
+                fontSize: 13,
+                color: "var(--md-on-surface)",
+              }}
+            >
+              <span style={{ fontWeight: 500 }}>{authUser.username}</span>
+              {onLogout && (
+                <button
+                  onClick={onLogout}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "var(--md-on-surface-variant)",
+                    cursor: "pointer",
+                    fontSize: 12,
+                    padding: "2px 6px",
+                    borderRadius: 4,
+                  }}
+                  title="Sign out"
+                >
+                  Logout
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Selected project */}
           {selectedProject ? (
             <div
@@ -162,22 +202,14 @@ export default function DashboardLayout({
                   fontWeight: 500,
                   padding: "2px 8px",
                   borderRadius: 6,
-                  background:
-                    selectedProject.mode === "github"
-                      ? "var(--md-primary)"
-                      : "var(--md-safe)",
-                  color:
-                    selectedProject.mode === "github"
-                      ? "var(--md-on-primary)"
-                      : "#000",
+                  background: "var(--md-primary)",
+                  color: "var(--md-on-primary)",
                 }}
               >
-                {selectedProject.mode === "github" ? "GitHub" : "Local"}
+                GitHub
               </span>
               <span style={{ fontWeight: 500 }}>
-                {selectedProject.mode === "github"
-                  ? selectedProject.repo.full_name
-                  : selectedProject.name}
+                {selectedProject.repo.full_name}
               </span>
             </div>
           ) : (

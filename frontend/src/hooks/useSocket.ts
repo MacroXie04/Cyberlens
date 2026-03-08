@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { io, Socket } from "socket.io-client";
-import type { HttpRequest, Alert, StatsOverview } from "../types";
+import type { HttpRequest, Alert, StatsOverview, CodeScanStreamEvent } from "../types";
 
 interface SocketEvents {
   onNewRequest?: (data: HttpRequest) => void;
@@ -8,6 +8,7 @@ interface SocketEvents {
   onStatsUpdate?: (data: StatsOverview) => void;
   onScanProgress?: (data: { scan_id: number; step: string; message: string }) => void;
   onScanComplete?: (data: { scan_id: number; status: string; message: string }) => void;
+  onCodeScanStream?: (data: CodeScanStreamEvent) => void;
 }
 
 export function useSocket(events: SocketEvents = {}, remoteUrl?: string | null) {
@@ -53,6 +54,10 @@ export function useSocket(events: SocketEvents = {}, remoteUrl?: string | null) 
 
     socket.on("scan_complete", (data) => {
       eventsRef.current.onScanComplete?.(data);
+    });
+
+    socket.on("code_scan_stream", (data: CodeScanStreamEvent) => {
+      eventsRef.current.onCodeScanStream?.(data);
     });
 
     return () => {

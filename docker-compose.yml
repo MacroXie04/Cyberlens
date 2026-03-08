@@ -31,7 +31,6 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
-      - ${LOCAL_SCAN_ROOT:-.}:/scan-targets:ro
     env_file: .env
     depends_on:
       db:
@@ -48,7 +47,6 @@ services:
     command: celery -A cyberlens worker -l INFO
     volumes:
       - ./backend:/app
-      - ${LOCAL_SCAN_ROOT:-.}:/scan-targets:ro
     env_file: .env
     depends_on:
       db:

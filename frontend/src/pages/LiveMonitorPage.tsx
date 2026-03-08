@@ -9,6 +9,7 @@ import TrafficTrend from "../components/LiveMonitor/TrafficTrend";
 import AttackTypes from "../components/LiveMonitor/AttackTypes";
 import LiveRequestStream from "../components/LiveMonitor/LiveRequestStream";
 import AiAnalysisPanel from "../components/LiveMonitor/AiAnalysisPanel";
+import CloudRunLogs from "../components/LiveMonitor/CloudRunLogs";
 
 interface Props {
   cloudRunUrl?: string | null;
@@ -95,6 +96,9 @@ export default function LiveMonitorPage({ cloudRunUrl }: Props) {
         <LiveRequestStream requests={requests} onSelect={setSelectedRequest} />
         <AiAnalysisPanel request={selectedRequest} />
       </div>
+
+      {/* Cloud Run Logs */}
+      <CloudRunLogs />
     </div>
   );
 }

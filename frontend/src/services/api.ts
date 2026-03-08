@@ -1,4 +1,5 @@
 import type {
+  AuthUser,
   HttpRequest,
   Alert,
   StatsOverview,
@@ -9,7 +10,8 @@ import type {
   GitHubScan,
   AiReport,
   CodeFinding,
-  LocalProject,
+  CloudRunLogEntry,
+  GcpSettings,
 } from "../types";
 
 const LOCAL_BASE = "/api";
@@ -23,12 +25,28 @@ export function getMonitorBaseUrl(): string | null {
   return monitorBase === "/api" ? null : monitorBase;
 }
 
+function getCsrfToken(): string {
+  const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]*)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const isRemote = !url.startsWith("/");
+  const method = init?.method?.toUpperCase() || "GET";
+  const needsCsrf = !isRemote && ["POST", "PUT", "DELETE", "PATCH"].includes(method);
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(init?.headers as Record<string, string>),
+  };
+  if (needsCsrf) {
+    headers["X-CSRFToken"] = getCsrfToken();
+  }
+
   const res = await fetch(url, {
-    headers: { "Content-Type": "application/json", ...init?.headers },
-    credentials: isRemote ? "omit" : "same-origin",
     ...init,
+    headers,
+    credentials: isRemote ? "omit" : "same-origin",
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -36,6 +54,27 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   }
   return res.json();
 }
+
+// Auth
+export const register = (username: string, email: string, password: string) =>
+  fetchJson<{ user: AuthUser }>(`${LOCAL_BASE}/auth/register/`, {
+    method: "POST",
+    body: JSON.stringify({ username, email, password }),
+  });
+
+export const login = (username: string, password: string) =>
+  fetchJson<{ user: AuthUser }>(`${LOCAL_BASE}/auth/login/`, {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+
+export const logout = () =>
+  fetchJson<{ status: string }>(`${LOCAL_BASE}/auth/logout/`, {
+    method: "POST",
+  });
+
+export const getMe = () =>
+  fetchJson<{ authenticated: boolean; user?: AuthUser }>(`${LOCAL_BASE}/auth/me/`);
 
 // Module A: Monitor (uses monitorBase — may point to remote Cloud Run)
 export const getRequests = (params?: string) =>
@@ -98,32 +137,58 @@ export const getAiReport = (id: number) =>
 export const getCodeFindings = (id: number) =>
   fetchJson<CodeFinding[]>(`${LOCAL_BASE}/github/scan/${id}/code-findings/`);
 
-// Local Scanner (always local)
-export const getLocalProjects = (path?: string) =>
-  fetchJson<LocalProject[]>(
-    `${LOCAL_BASE}/github/local/projects/${path ? `?path=${encodeURIComponent(path)}` : ""}`
-  );
-
-export const triggerLocalScan = (path: string) =>
-  fetchJson<GitHubScan>(`${LOCAL_BASE}/github/local/scan/`, {
-    method: "POST",
-    body: JSON.stringify({ path }),
-  });
-
 // Settings (always local)
 export const getSettings = () =>
-  fetchJson<{ google_api_key_set: boolean; google_api_key_preview: string }>(
+  fetchJson<{ google_api_key_set: boolean; google_api_key_preview: string; gemini_model: string }>(
     `${LOCAL_BASE}/settings/`
   );
 
-export const updateSettings = (google_api_key: string) =>
-  fetchJson<{ google_api_key_set: boolean; google_api_key_preview: string }>(
+export const updateSettings = (data: { google_api_key?: string; gemini_model?: string }) =>
+  fetchJson<{ google_api_key_set: boolean; google_api_key_preview: string; gemini_model: string }>(
     `${LOCAL_BASE}/settings/`,
-    { method: "PUT", body: JSON.stringify({ google_api_key }) }
+    { method: "PUT", body: JSON.stringify(data) }
   );
+
+export const getAvailableModels = () =>
+  fetchJson<{ models: string[] }>(`${LOCAL_BASE}/settings/models/`);
 
 export const testApiKey = () =>
   fetchJson<{ success: boolean; models?: string[]; error?: string }>(
     `${LOCAL_BASE}/settings/test-key/`,
     { method: "POST" }
   );
+
+// GCP Cloud Logging settings (always local)
+export const getGcpSettings = () =>
+  fetchJson<GcpSettings>(`${LOCAL_BASE}/settings/gcp/`);
+
+export const updateGcpSettings = (data: {
+  gcp_project_id?: string;
+  gcp_service_name?: string;
+  gcp_region?: string;
+  gcp_service_account_key?: string;
+}) =>
+  fetchJson<GcpSettings>(`${LOCAL_BASE}/settings/gcp/`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+
+// Cloud Run Logs (always local — backend fetches from GCP)
+export const getCloudRunLogs = (params?: {
+  limit?: number;
+  hours?: number;
+  severity?: string;
+  q?: string;
+  page_token?: string;
+}) => {
+  const searchParams = new URLSearchParams();
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  if (params?.hours) searchParams.set("hours", String(params.hours));
+  if (params?.severity) searchParams.set("severity", params.severity);
+  if (params?.q) searchParams.set("q", params.q);
+  if (params?.page_token) searchParams.set("page_token", params.page_token);
+  const qs = searchParams.toString();
+  return fetchJson<{ entries: CloudRunLogEntry[]; next_page_token?: string }>(
+    `${LOCAL_BASE}/cloud-run-logs/${qs ? `?${qs}` : ""}`
+  );
+};

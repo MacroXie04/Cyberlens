@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 from pydantic import BaseModel, Field
 from google.adk import Agent
 from google.adk.runners import InMemoryRunner
@@ -38,21 +39,23 @@ class BatchAnalysisResult(BaseModel):
     )
 
 
-# Create the threat analysis agent
-threat_agent = Agent(
-    name="threat_analyzer",
-    model="gemini-2.5-flash",
-    instruction=SYSTEM_INSTRUCTION,
-    output_schema=BatchAnalysisResult,
-    generate_content_config=types.GenerateContentConfig(
-        temperature=0.2,
-    ),
-)
+def _build_threat_agent(model: str) -> Agent:
+    return Agent(
+        name="threat_analyzer",
+        model=model,
+        instruction=SYSTEM_INSTRUCTION,
+        output_schema=BatchAnalysisResult,
+        generate_content_config=types.GenerateContentConfig(
+            temperature=0.2,
+        ),
+    )
 
 
 @shared_task
 def analyze_batch(request_ids: list[int]):
     """Analyze a batch of HTTP requests using Google ADK with Gemini."""
+    from cyberlens.utils import DEFAULT_GEMINI_MODEL, log_gemini_call
+
     if not settings.GOOGLE_API_KEY:
         logger.warning("GOOGLE_API_KEY not set, skipping AI analysis")
         return
@@ -78,15 +81,19 @@ def analyze_batch(request_ids: list[int]):
             }
         )
 
-    try:
-        runner = InMemoryRunner(agent=threat_agent, app_name="cyberlens_threat")
+    input_text = json.dumps(batch_data)
+    response_text = ""
+    start_time = time.time()
 
-        response_text = ""
+    try:
+        agent = _build_threat_agent(DEFAULT_GEMINI_MODEL)
+        runner = InMemoryRunner(agent=agent, app_name="cyberlens_threat")
+
         for event in runner.run(
             user_id="system",
             session_id=f"batch-{request_ids[0]}",
             new_message=types.UserContent(
-                parts=[types.Part(text=json.dumps(batch_data))]
+                parts=[types.Part(text=input_text)]
             ),
         ):
             if event.is_final_response() and event.content:
@@ -140,5 +147,27 @@ def analyze_batch(request_ids: list[int]):
             }
         )
 
+        duration_ms = int((time.time() - start_time) * 1000)
+        log_gemini_call(
+            service="threat_analysis",
+            related_object_id=request_ids[0],
+            model_name=DEFAULT_GEMINI_MODEL,
+            prompt_summary=input_text,
+            response_summary=response_text,
+            status="success",
+            duration_ms=duration_ms,
+        )
+
     except Exception:
+        duration_ms = int((time.time() - start_time) * 1000)
         logger.exception("AI analysis failed")
+        log_gemini_call(
+            service="threat_analysis",
+            related_object_id=request_ids[0] if request_ids else None,
+            model_name=DEFAULT_GEMINI_MODEL,
+            prompt_summary=input_text,
+            response_summary=response_text,
+            status="error",
+            error_message="AI analysis failed",
+            duration_ms=duration_ms,
+        )

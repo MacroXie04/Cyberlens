@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 from typing import Optional
 from pydantic import BaseModel, Field
 from google.adk import Agent
@@ -37,22 +38,23 @@ class SecurityReport(BaseModel):
     remediation: Remediation = Field(description="Categorized remediation actions")
 
 
-# Create the security report agent
-report_agent = Agent(
-    name="security_reporter",
-    model="gemini-2.5-flash",
-    instruction=SYSTEM_INSTRUCTION,
-    output_schema=SecurityReport,
-    generate_content_config=types.GenerateContentConfig(
-        temperature=0.3,
-    ),
-)
+def _build_report_agent(model: str) -> Agent:
+    return Agent(
+        name="security_reporter",
+        model=model,
+        instruction=SYSTEM_INSTRUCTION,
+        output_schema=SecurityReport,
+        generate_content_config=types.GenerateContentConfig(
+            temperature=0.3,
+        ),
+    )
 
 
-def generate_report(scan: GitHubScan):
+def generate_report(scan: GitHubScan, user_id: int | None = None):
     """Generate AI-powered risk assessment using Google ADK with Gemini."""
-    from cyberlens.utils import get_google_api_key
+    from cyberlens.utils import get_google_api_key, get_user_gemini_model, log_gemini_call
     api_key = get_google_api_key()
+    model_name = get_user_gemini_model(user_id)
     if not api_key:
         logger.warning("GOOGLE_API_KEY not set, skipping AI report")
         return
@@ -88,8 +90,12 @@ def generate_report(scan: GitHubScan):
         scan.save()
         return
 
+    start_time = time.time()
+    input_data = ""
+    response_text = ""
     try:
-        runner = InMemoryRunner(agent=report_agent, app_name="cyberlens_report")
+        agent = _build_report_agent(model_name)
+        runner = InMemoryRunner(agent=agent, app_name="cyberlens_report")
 
         input_data = json.dumps(
             {
@@ -100,7 +106,6 @@ def generate_report(scan: GitHubScan):
             }
         )
 
-        response_text = ""
         for event in runner.run(
             user_id="system",
             session_id=f"scan-{scan.id}",
@@ -126,5 +131,29 @@ def generate_report(scan: GitHubScan):
             remediation_json=result.remediation.model_dump(),
         )
 
+        duration_ms = int((time.time() - start_time) * 1000)
+        log_gemini_call(
+            user_id=user_id,
+            service="security_report",
+            related_object_id=scan.id,
+            model_name=model_name,
+            prompt_summary=input_data,
+            response_summary=response_text,
+            status="success",
+            duration_ms=duration_ms,
+        )
+
     except Exception:
+        duration_ms = int((time.time() - start_time) * 1000)
         logger.exception("AI report generation failed")
+        log_gemini_call(
+            user_id=user_id,
+            service="security_report",
+            related_object_id=scan.id,
+            model_name=model_name,
+            prompt_summary=input_data,
+            response_summary=response_text,
+            status="error",
+            error_message="AI report generation failed",
+            duration_ms=duration_ms,
+        )

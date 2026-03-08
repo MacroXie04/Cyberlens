@@ -4,8 +4,9 @@ from monitor.models import HttpRequest, AnalysisResult, Alert
 
 
 @pytest.fixture
-def api_client():
-    return APIClient()
+def api_client(authenticated_client):
+    """Use authenticated client for all monitor tests."""
+    return authenticated_client
 
 
 @pytest.mark.django_db
@@ -83,3 +84,31 @@ class TestAlertViewSet:
         assert resp.status_code == 200
         alert.refresh_from_db()
         assert alert.acknowledged is True
+
+
+@pytest.mark.django_db
+class TestVerifySession:
+    def test_authenticated(self, api_client):
+        resp = api_client.get("/api/verify-session/")
+        assert resp.status_code == 200
+        assert resp.data["status"] == "authenticated"
+
+    def test_unauthenticated(self):
+        client = APIClient()
+        resp = client.get("/api/verify-session/")
+        assert resp.status_code == 403
+
+
+@pytest.mark.django_db
+class TestUnauthenticated:
+    """Verify monitor endpoints reject unauthenticated requests."""
+
+    def test_stats_overview(self):
+        client = APIClient()
+        resp = client.get("/api/stats/overview/")
+        assert resp.status_code == 403
+
+    def test_requests_list(self):
+        client = APIClient()
+        resp = client.get("/api/requests/")
+        assert resp.status_code == 403

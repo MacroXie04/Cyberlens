@@ -11,9 +11,10 @@ type StepKey = (typeof STEPS)[number]["key"];
 interface Props {
   currentStep: StepKey | "starting" | "completed" | "failed" | "";
   message: string;
+  codeScanDetail?: string;
 }
 
-export default function ScanProgress({ currentStep, message }: Props) {
+export default function ScanProgress({ currentStep, message, codeScanDetail }: Props) {
   if (!currentStep && !message) return null;
 
   const currentIdx = STEPS.findIndex((s) => s.key === currentStep);
@@ -124,7 +125,9 @@ export default function ScanProgress({ currentStep, message }: Props) {
                   textAlign: "center",
                 }}
               >
-                {step.label}
+                {step.key === "code_scan" && status === "active" && codeScanDetail
+                  ? codeScanDetail
+                  : step.label}
               </span>
             </div>
           );
