@@ -21,7 +21,7 @@ class TestGitHubSourceFiles:
         files = get_source_files("ghp_token", "owner/repo")
 
         assert files == {"AppDelegate.swift": "import SwiftUI"}
-        mock_fetch.assert_called_once_with("ghp_token", "owner", "repo", ["AppDelegate.swift"])
+        mock_fetch.assert_called_once_with("ghp_token", "owner", "repo", ["AppDelegate.swift"], max_workers=None)
 
     @patch("scanner.services.github_client.requests.get")
     def test_repo_tree_error_raises(self, mock_get):
