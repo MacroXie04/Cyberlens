@@ -73,7 +73,7 @@ class LogFileHandler(FileSystemEventHandler):
 
         if batch:
             logger.info("Analyzing batch of %d requests", len(batch))
-            analyze_batch(batch)
+            analyze_batch.delay(batch)
 
 
 def start_watching():

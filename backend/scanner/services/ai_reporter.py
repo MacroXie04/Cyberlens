@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 from google.adk import Agent
 from google.adk.runners import InMemoryRunner
 from google.genai import types
-from django.conf import settings
 from scanner.models import GitHubScan, AiReport
 
 logger = logging.getLogger(__name__)
@@ -52,11 +51,13 @@ report_agent = Agent(
 
 def generate_report(scan: GitHubScan):
     """Generate AI-powered risk assessment using Google ADK with Gemini."""
-    if not settings.GOOGLE_API_KEY:
+    from cyberlens.utils import get_google_api_key
+    api_key = get_google_api_key()
+    if not api_key:
         logger.warning("GOOGLE_API_KEY not set, skipping AI report")
         return
 
-    os.environ.setdefault("GOOGLE_API_KEY", settings.GOOGLE_API_KEY)
+    os.environ["GOOGLE_API_KEY"] = api_key
 
     # Gather vulnerability data
     vuln_data = []
@@ -112,7 +113,8 @@ def generate_report(scan: GitHubScan):
                     if part.text:
                         response_text += part.text
 
-        result = SecurityReport.model_validate_json(response_text)
+        from cyberlens.utils import clean_json_response
+        result = SecurityReport.model_validate_json(clean_json_response(response_text))
 
         scan.security_score = result.security_score
         scan.save()

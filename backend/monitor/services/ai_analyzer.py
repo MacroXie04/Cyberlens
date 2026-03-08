@@ -9,6 +9,7 @@ from django.conf import settings
 from monitor.models import HttpRequest, AnalysisResult, Alert
 from monitor.serializers import HttpRequestSerializer, AlertSerializer
 from . import redis_publisher
+from celery import shared_task
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ brute force indicators (high frequency from same IP), and bot/scraper user agent
 
 
 class ThreatAnalysis(BaseModel):
+    request_id: int = Field(description="The ID of the request being analyzed")
     threat_level: str = Field(description="One of: safe, suspicious, malicious")
     threat_type: str = Field(
         description="One of: none, sql_injection, xss, path_traversal, brute_force, bot_scraping, ddos, unknown"
@@ -48,6 +50,7 @@ threat_agent = Agent(
 )
 
 
+@shared_task
 def analyze_batch(request_ids: list[int]):
     """Analyze a batch of HTTP requests using Google ADK with Gemini."""
     if not settings.GOOGLE_API_KEY:
@@ -91,10 +94,15 @@ def analyze_batch(request_ids: list[int]):
                     if part.text:
                         response_text += part.text
 
-        parsed = BatchAnalysisResult.model_validate_json(response_text)
+        from cyberlens.utils import clean_json_response
+        parsed = BatchAnalysisResult.model_validate_json(clean_json_response(response_text))
         results = parsed.analyses
+        results_by_id = {r.request_id: r for r in results}
 
-        for req_data, result in zip(batch_data, results):
+        for req_data in batch_data:
+            result = results_by_id.get(req_data["id"])
+            if not result:
+                continue
             req = http_requests.get(id=req_data["id"])
             analysis = AnalysisResult.objects.create(
                 request=req,

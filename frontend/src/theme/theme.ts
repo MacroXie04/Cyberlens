@@ -1,24 +1,24 @@
-// Material You (M3) Design Tokens — Dark Cybersecurity Theme
+// Material You (M3) Design Tokens — Light White Theme
 
 export const colors = {
-  primary: "#00BCD4",
-  onPrimary: "#003738",
-  primaryContainer: "#004F51",
-  onPrimaryContainer: "#6FF7FF",
+  primary: "#00838F",
+  onPrimary: "#FFFFFF",
+  primaryContainer: "#B2EBF2",
+  onPrimaryContainer: "#004F54",
 
-  surface: "#0E1415",
-  surfaceContainer: "#121C1E",
-  surfaceContainerHigh: "#1C2729",
-  surfaceContainerHighest: "#263233",
-  onSurface: "#E0E3E3",
-  onSurfaceVariant: "#BFC8CA",
+  surface: "#FAFAFA",
+  surfaceContainer: "#F5F5F5",
+  surfaceContainerHigh: "#EEEEEE",
+  surfaceContainerHighest: "#E0E0E0",
+  onSurface: "#1C1C1E",
+  onSurfaceVariant: "#5C5C5E",
 
-  error: "#EF5350",
-  warning: "#FFD54F",
-  safe: "#81C784",
+  error: "#C62828",
+  warning: "#F9A825",
+  safe: "#2E7D32",
 
-  outline: "#899294",
-  outlineVariant: "#3F4849",
+  outline: "#757575",
+  outlineVariant: "#BDBDBD",
 } as const;
 
 export const radius = {

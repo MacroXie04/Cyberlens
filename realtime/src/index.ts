@@ -19,6 +19,27 @@ app.get("/health", (_req, res) => {
 });
 
 // Socket.IO connection handling
+io.use(async (socket, next) => {
+  try {
+    const cookie = socket.handshake.headers.cookie;
+    if (!cookie) {
+      return next(new Error("Authentication error: No cookies provided"));
+    }
+    const backendUrl = process.env.BACKEND_URL || "http://backend:8000";
+    const response = await fetch(`${backendUrl}/api/verify-session/`, {
+      headers: { cookie },
+    });
+
+    if (response.ok) {
+      return next();
+    } else {
+      return next(new Error("Authentication error: Invalid session"));
+    }
+  } catch (err) {
+    return next(new Error("Authentication error: Internal server error"));
+  }
+});
+
 io.on("connection", (socket) => {
   console.log(`Client connected: ${socket.id}`);
 

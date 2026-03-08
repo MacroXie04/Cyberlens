@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import GitHubScan, Dependency, Vulnerability, AiReport
+from .models import GitHubScan, Dependency, Vulnerability, AiReport, CodeFinding
 
 
 class VulnerabilitySerializer(serializers.ModelSerializer):
@@ -24,8 +24,25 @@ class DependencySerializer(serializers.ModelSerializer):
         fields = ["id", "name", "version", "ecosystem", "is_vulnerable", "vulnerabilities"]
 
 
+class CodeFindingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CodeFinding
+        fields = [
+            "id",
+            "file_path",
+            "line_number",
+            "severity",
+            "category",
+            "title",
+            "description",
+            "code_snippet",
+            "recommendation",
+        ]
+
+
 class GitHubScanSerializer(serializers.ModelSerializer):
     dependencies = DependencySerializer(many=True, read_only=True)
+    code_findings = CodeFindingSerializer(many=True, read_only=True)
 
     class Meta:
         model = GitHubScan
@@ -33,12 +50,14 @@ class GitHubScanSerializer(serializers.ModelSerializer):
             "id",
             "repo_name",
             "repo_url",
+            "scan_source",
             "scan_status",
             "total_deps",
             "vulnerable_deps",
             "security_score",
             "scanned_at",
             "dependencies",
+            "code_findings",
         ]
 
 
@@ -49,6 +68,7 @@ class GitHubScanListSerializer(serializers.ModelSerializer):
             "id",
             "repo_name",
             "repo_url",
+            "scan_source",
             "scan_status",
             "total_deps",
             "vulnerable_deps",

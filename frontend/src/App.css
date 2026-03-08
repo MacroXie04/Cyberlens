@@ -1,4 +1,4 @@
-/* Global Styles — Material You Dark Theme */
+/* Global Styles — Material You Light (White) Theme */
 
 *,
 *::before,
@@ -9,7 +9,7 @@
 }
 
 html {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
@@ -146,6 +146,17 @@ body {
   display: grid;
   gap: 16px;
   padding: 16px;
+}
+
+/* Spin animation for loaders */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Shimmer for active progress bar */
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
 }
 
 /* Scrollbar */

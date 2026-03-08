@@ -65,6 +65,13 @@ def stats_timeline(request):
 
 
 @api_view(["GET"])
+def verify_session(request):
+    if request.session.get("github_pat"):
+        return Response({"status": "authenticated"})
+    return Response({"error": "unauthenticated"}, status=status.HTTP_401_UNAUTHORIZED)
+
+
+@api_view(["GET"])
 def stats_geo(request):
     data = (
         HttpRequest.objects.exclude(geo_country="")

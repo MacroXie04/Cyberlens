@@ -10,7 +10,11 @@ import AttackTypes from "../components/LiveMonitor/AttackTypes";
 import LiveRequestStream from "../components/LiveMonitor/LiveRequestStream";
 import AiAnalysisPanel from "../components/LiveMonitor/AiAnalysisPanel";
 
-export default function LiveMonitorPage() {
+interface Props {
+  cloudRunUrl?: string | null;
+}
+
+export default function LiveMonitorPage({ cloudRunUrl }: Props) {
   const [stats, setStats] = useState<StatsOverview>({
     total_requests: 0,
     threats_detected: 0,
@@ -22,13 +26,13 @@ export default function LiveMonitorPage() {
   const [requests, setRequests] = useState<HttpRequest[]>([]);
   const [selectedRequest, setSelectedRequest] = useState<HttpRequest | null>(null);
 
-  // Load initial data
+  // Load initial data (re-fetch when cloudRunUrl changes)
   useEffect(() => {
     getStatsOverview().then(setStats).catch(console.error);
     getStatsTimeline().then(setTimeline).catch(console.error);
     getStatsGeo().then(setGeoData).catch(console.error);
     getRequests().then((data) => setRequests(data.results)).catch(console.error);
-  }, []);
+  }, [cloudRunUrl]);
 
   // Real-time updates via WebSocket
   const onNewRequest = useCallback((req: HttpRequest) => {
@@ -39,7 +43,7 @@ export default function LiveMonitorPage() {
     setStats(update);
   }, []);
 
-  useSocket({ onNewRequest, onStatsUpdate });
+  useSocket({ onNewRequest, onStatsUpdate }, cloudRunUrl);
 
   // Compute attack type distribution from requests
   const attackTypes = requests.reduce<Record<string, number>>((acc, req) => {

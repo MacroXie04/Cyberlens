@@ -68,12 +68,14 @@ export interface GitHubScan {
   id: number;
   repo_name: string;
   repo_url: string;
+  scan_source: "github" | "local";
   scan_status: "pending" | "scanning" | "completed" | "failed";
   total_deps: number;
   vulnerable_deps: number;
   security_score: number;
   scanned_at: string;
   dependencies?: Dependency[];
+  code_findings?: CodeFinding[];
 }
 
 export interface Dependency {
@@ -112,6 +114,24 @@ export interface AiReport {
   generated_at: string;
 }
 
+export interface CodeFinding {
+  id: number;
+  file_path: string;
+  line_number: number;
+  severity: string;
+  category: string;
+  title: string;
+  description: string;
+  code_snippet: string;
+  recommendation: string;
+}
+
+export interface LocalProject {
+  name: string;
+  path: string;
+  has_manifest: boolean;
+}
+
 export interface GitHubUser {
   login: string;
   avatar_url: string;
@@ -124,4 +144,15 @@ export interface GitHubRepo {
   private: boolean;
   language: string | null;
   updated_at: string;
+  description: string;
+  stargazers_count: number;
+  forks_count: number;
+  open_issues_count: number;
+  default_branch: string;
+  html_url: string;
 }
+
+export type SelectedProject =
+  | { mode: "github"; repo: GitHubRepo }
+  | { mode: "local"; path: string; name: string }
+  | null;

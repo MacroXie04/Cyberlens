@@ -31,12 +31,34 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+      - ${LOCAL_SCAN_ROOT:-.}:/scan-targets:ro
     env_file: .env
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+    develop:
+      watch:
+        - action: rebuild
+          path: ./backend/requirements.txt
+
+  worker:
+    build: ./backend
+    command: celery -A cyberlens worker -l INFO
+    volumes:
+      - ./backend:/app
+      - ${LOCAL_SCAN_ROOT:-.}:/scan-targets:ro
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    develop:
+      watch:
+        - action: rebuild
+          path: ./backend/requirements.txt
 
   realtime:
     build: ./realtime
@@ -49,6 +71,10 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    develop:
+      watch:
+        - action: rebuild
+          path: ./realtime/package.json
 
   frontend:
     build: ./frontend
@@ -60,6 +86,10 @@ services:
     depends_on:
       - backend
       - realtime
+    develop:
+      watch:
+        - action: rebuild
+          path: ./frontend/package.json
 
 volumes:
   pgdata:

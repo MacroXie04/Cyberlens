@@ -11,4 +11,5 @@ urlpatterns = [
     path("stats/overview/", views.stats_overview, name="stats-overview"),
     path("stats/timeline/", views.stats_timeline, name="stats-timeline"),
     path("stats/geo/", views.stats_geo, name="stats-geo"),
+    path("verify-session/", views.verify_session, name="verify-session"),
 ]

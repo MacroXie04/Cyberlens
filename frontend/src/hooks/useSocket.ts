@@ -10,17 +10,25 @@ interface SocketEvents {
   onScanComplete?: (data: { scan_id: number; status: string; message: string }) => void;
 }
 
-export function useSocket(events: SocketEvents = {}) {
+export function useSocket(events: SocketEvents = {}, remoteUrl?: string | null) {
   const [connected, setConnected] = useState(false);
   const socketRef = useRef<Socket | null>(null);
   const eventsRef = useRef(events);
   eventsRef.current = events;
 
   useEffect(() => {
-    const socket = io({
-      path: "/socket.io",
-      transports: ["websocket", "polling"],
-    });
+    const isRemote = !!remoteUrl;
+    const socket = isRemote
+      ? io(remoteUrl, {
+          path: "/socket.io",
+          transports: ["websocket", "polling"],
+          withCredentials: false,
+        })
+      : io({
+          path: "/socket.io",
+          transports: ["websocket", "polling"],
+          withCredentials: true,
+        });
 
     socketRef.current = socket;
 
@@ -50,7 +58,7 @@ export function useSocket(events: SocketEvents = {}) {
     return () => {
       socket.disconnect();
     };
-  }, []);
+  }, [remoteUrl]);
 
   const emit = useCallback((event: string, data: unknown) => {
     socketRef.current?.emit(event, data);

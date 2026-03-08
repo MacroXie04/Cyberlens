@@ -5,6 +5,10 @@ logger = logging.getLogger(__name__)
 
 GITHUB_API = "https://api.github.com"
 
+SOURCE_EXTENSIONS = {".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rb", ".java", ".php", ".html"}
+SKIP_PATHS = {"node_modules/", "__pycache__/", ".git/", "dist/", "venv/", ".venv/", "build/", "vendor/"}
+MAX_FILE_SIZE = 50 * 1024  # 50KB
+
 # Manifest files to look for in repositories
 MANIFEST_FILES = [
     "package.json",
@@ -53,6 +57,12 @@ def list_repos(pat: str, per_page: int = 30) -> list[dict]:
                 "private": r["private"],
                 "language": r.get("language"),
                 "updated_at": r["updated_at"],
+                "description": r.get("description") or "",
+                "stargazers_count": r.get("stargazers_count", 0),
+                "forks_count": r.get("forks_count", 0),
+                "open_issues_count": r.get("open_issues_count", 0),
+                "default_branch": r.get("default_branch", "main"),
+                "html_url": r.get("html_url", ""),
             }
             for r in resp.json()
         ]
@@ -84,3 +94,52 @@ def get_dependency_files(pat: str, repo_full_name: str) -> dict[str, str]:
         if content is not None:
             found[filename] = content
     return found
+
+
+def get_source_files(pat: str, repo_full_name: str) -> dict[str, str]:
+    """Fetch source code files from a GitHub repo for security analysis."""
+    owner, repo = repo_full_name.split("/", 1)
+    try:
+        # Get the default branch
+        resp = requests.get(
+            f"{GITHUB_API}/repos/{owner}/{repo}",
+            headers=_headers(pat),
+            timeout=10,
+        )
+        resp.raise_for_status()
+        default_branch = resp.json().get("default_branch", "main")
+
+        # Get the full file tree
+        resp = requests.get(
+            f"{GITHUB_API}/repos/{owner}/{repo}/git/trees/{default_branch}",
+            headers=_headers(pat),
+            params={"recursive": "1"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        tree = resp.json().get("tree", [])
+    except requests.RequestException:
+        logger.exception("Failed to fetch repo tree for %s", repo_full_name)
+        return {}
+
+    files = {}
+    for item in tree:
+        if item.get("type") != "blob":
+            continue
+        path = item.get("path", "")
+        # Skip non-source files
+        if not any(path.endswith(ext) for ext in SOURCE_EXTENSIONS):
+            continue
+        # Skip blacklisted directories
+        if any(skip in path for skip in SKIP_PATHS):
+            continue
+        # Skip large files
+        size = item.get("size", 0)
+        if size > MAX_FILE_SIZE or size == 0:
+            continue
+
+        content = get_file_content(pat, owner, repo, path)
+        if content is not None:
+            files[path] = content
+
+    return files

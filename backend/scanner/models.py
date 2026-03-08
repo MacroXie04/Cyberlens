@@ -8,8 +8,15 @@ class GitHubScan(models.Model):
         COMPLETED = "completed", "Completed"
         FAILED = "failed", "Failed"
 
+    class Source(models.TextChoices):
+        GITHUB = "github", "GitHub"
+        LOCAL = "local", "Local"
+
     repo_name = models.CharField(max_length=255)
-    repo_url = models.URLField()
+    repo_url = models.CharField(max_length=500)
+    scan_source = models.CharField(
+        max_length=10, choices=Source.choices, default=Source.GITHUB
+    )
     scan_status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.PENDING
     )
@@ -70,3 +77,23 @@ class AiReport(models.Model):
 
     def __str__(self):
         return f"Report for {self.scan.repo_name}"
+
+
+class CodeFinding(models.Model):
+    scan = models.ForeignKey(
+        GitHubScan, on_delete=models.CASCADE, related_name="code_findings"
+    )
+    file_path = models.CharField(max_length=500)
+    line_number = models.IntegerField(default=0)
+    severity = models.CharField(max_length=20)
+    category = models.CharField(max_length=50)
+    title = models.CharField(max_length=255)
+    description = models.TextField()
+    code_snippet = models.TextField(blank=True, default="")
+    recommendation = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["severity", "-id"]
+
+    def __str__(self):
+        return f"{self.severity}: {self.title} ({self.file_path}:{self.line_number})"
