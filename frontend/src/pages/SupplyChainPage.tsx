@@ -30,7 +30,7 @@ export default function SupplyChainPage({ selectedProject }: Props) {
   // Code scan streaming state
   const [codeScanStreamEvents, setCodeScanStreamEvents] = useState<CodeScanStreamEvent[]>([]);
   const [codeScanActive, setCodeScanActive] = useState(false);
-  const [codeScanSummary, setCodeScanSummary] = useState<CodeScanStreamEvent | null>(null);
+  const [_codeScanSummary, setCodeScanSummary] = useState<CodeScanStreamEvent | null>(null);
 
   async function fetchScanResults(scanId: number) {
     setScanning(false);
