@@ -76,6 +76,64 @@ class TestScan:
         scan = GitHubScan.objects.get()
         assert mock_dispatch.call_args.args[1] == scan.id
 
+    @patch("scanner.views.validate_token", return_value={"login": "u", "avatar_url": "", "name": "U"})
+    @patch("scanner.views._dispatch_background_task")
+    def test_defaults_to_fast_scan_mode(self, mock_dispatch, mock_validate, api_client):
+        api_client.post("/api/github/connect/", {"token": "ghp_valid"}, format="json")
+
+        resp = api_client.post("/api/github/scan/", {"repo": "owner/repo"}, format="json")
+
+        assert resp.status_code == 202
+        scan = GitHubScan.objects.get()
+        assert scan.scan_mode == "fast"
+        assert mock_dispatch.call_args.kwargs["scan_mode"] == "fast"
+
+    @patch("scanner.views.validate_token", return_value={"login": "u", "avatar_url": "", "name": "U"})
+    @patch("scanner.views._dispatch_background_task")
+    def test_accepts_full_scan_mode(self, mock_dispatch, mock_validate, api_client):
+        api_client.post("/api/github/connect/", {"token": "ghp_valid"}, format="json")
+
+        resp = api_client.post(
+            "/api/github/scan/",
+            {"repo": "owner/repo", "scan_mode": "full"},
+            format="json",
+        )
+
+        assert resp.status_code == 202
+        scan = GitHubScan.objects.get()
+        assert scan.scan_mode == "full"
+        assert mock_dispatch.call_args.kwargs["scan_mode"] == "full"
+
+
+@pytest.mark.django_db
+class TestScansList:
+    def test_requires_repo_query_param(self, api_client):
+        resp = api_client.get("/api/github/scans/")
+        assert resp.status_code == 400
+
+    def test_returns_repo_scoped_history_for_current_user(
+        self,
+        api_client,
+        scan_factory,
+        code_finding_factory,
+        user_factory,
+    ):
+        older = scan_factory(user=api_client._user, repo_name="owner/repo", scan_status="failed")
+        newest = scan_factory(user=api_client._user, repo_name="owner/repo", scan_status="completed")
+        code_finding_factory(newest)
+        other_repo = scan_factory(user=api_client._user, repo_name="owner/other")
+        other_user = user_factory(username="other-user")
+        scan_factory(user=other_user, repo_name="owner/repo")
+
+        resp = api_client.get("/api/github/scans/?repo=owner/repo")
+
+        assert resp.status_code == 200
+        assert [item["id"] for item in resp.data] == [newest.id, older.id]
+        assert all(item["repo_name"] == "owner/repo" for item in resp.data)
+        assert resp.data[0]["code_findings_count"] == 1
+        assert resp.data[0]["scan_mode"] == "fast"
+        assert other_repo.id not in [item["id"] for item in resp.data]
+
 
 @pytest.mark.django_db
 class TestScanDetail:
@@ -88,6 +146,7 @@ class TestScanDetail:
     def test_token_fields_returned(self, api_client, scan_factory):
         scan = scan_factory(
             user=api_client._user,
+            scan_mode="full",
             code_scan_input_tokens=1200,
             code_scan_output_tokens=800,
             code_scan_total_tokens=2000,
@@ -96,6 +155,7 @@ class TestScanDetail:
         )
         resp = api_client.get(f"/api/github/scan/{scan.id}/")
         assert resp.status_code == 200
+        assert resp.data["scan_mode"] == "full"
         assert resp.data["code_scan_input_tokens"] == 1200
         assert resp.data["code_scan_output_tokens"] == 800
         assert resp.data["code_scan_total_tokens"] == 2000

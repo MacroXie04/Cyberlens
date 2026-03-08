@@ -164,6 +164,7 @@ class GcpSecurityEvent(models.Model):
     status_code = models.IntegerField(null=True, blank=True)
     trace_id = models.CharField(max_length=200, blank=True, default="")
     request_id = models.CharField(max_length=200, blank=True, default="")
+    fingerprint = models.CharField(max_length=64, null=True, blank=True, db_index=True)
     country = models.CharField(max_length=100, blank=True, default="")
     geo_lat = models.FloatField(null=True, blank=True)
     geo_lng = models.FloatField(null=True, blank=True)
@@ -185,6 +186,13 @@ class GcpSecurityEvent(models.Model):
             models.Index(fields=["user", "project_id", "-timestamp"]),
             models.Index(fields=["user", "severity", "-timestamp"]),
             models.Index(fields=["user", "category", "-timestamp"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "project_id", "fingerprint"],
+                condition=models.Q(fingerprint__isnull=False),
+                name="monitor_gcpevent_fingerprint_unique",
+            ),
         ]
 
     def __str__(self):
@@ -268,6 +276,12 @@ class GcpServiceHealth(models.Model):
         ordering = ["-bucket_end"]
         indexes = [
             models.Index(fields=["user", "project_id", "service_name", "-bucket_end"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "project_id", "service_name", "region", "bucket_end"],
+                name="monitor_gcphealth_bucket_unique",
+            ),
         ]
 
     def __str__(self):

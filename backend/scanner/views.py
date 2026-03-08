@@ -6,6 +6,7 @@ import requests as http_requests
 from django.conf import settings as django_settings
 from django.core.cache import cache
 from django.db import close_old_connections
+from django.db.models import Count
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -160,15 +161,28 @@ def scan(request):
             {"error": "repo is required"}, status=status.HTTP_400_BAD_REQUEST
         )
 
+    scan_mode = request.data.get("scan_mode", GitHubScan.Mode.FAST)
+    if scan_mode not in {GitHubScan.Mode.FAST, GitHubScan.Mode.FULL}:
+        return Response(
+            {"error": "scan_mode must be 'fast' or 'full'"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     github_scan = GitHubScan.objects.create(
         user=request.user,
         repo_name=repo_full_name,
         repo_url=f"https://github.com/{repo_full_name}",
+        scan_mode=scan_mode,
         scan_status="scanning",
     )
 
     _dispatch_background_task(
-        run_full_scan, github_scan.id, pat, repo_full_name, user_id=request.user.id
+        run_full_scan,
+        github_scan.id,
+        pat,
+        repo_full_name,
+        user_id=request.user.id,
+        scan_mode=scan_mode,
     )
 
     return Response(
@@ -178,9 +192,29 @@ def scan(request):
 
 
 @api_view(["GET"])
+def scans(request):
+    repo_full_name = request.query_params.get("repo", "").strip()
+    if not repo_full_name:
+        return Response(
+            {"error": "repo query parameter is required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    history = (
+        GitHubScan.objects.filter(user=request.user, repo_name=repo_full_name)
+        .annotate(code_findings_count=Count("code_findings"))
+        .order_by("-scanned_at")
+    )
+    return Response(GitHubScanListSerializer(history, many=True).data)
+
+
+@api_view(["GET"])
 def scan_detail(request, scan_id):
     try:
-        github_scan = GitHubScan.objects.get(id=scan_id, user=request.user)
+        github_scan = (
+            GitHubScan.objects.annotate(code_findings_count=Count("code_findings"))
+            .get(id=scan_id, user=request.user)
+        )
     except GitHubScan.DoesNotExist:
         return Response(
             {"error": "Scan not found"}, status=status.HTTP_404_NOT_FOUND
@@ -431,16 +465,27 @@ def local_scan(request):
         _vlp(dir_path)
     except (ValueError, FileNotFoundError) as e:
         return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    scan_mode = request.data.get("scan_mode", GitHubScan.Mode.FAST)
+    if scan_mode not in {GitHubScan.Mode.FAST, GitHubScan.Mode.FULL}:
+        return Response(
+            {"error": "scan_mode must be 'fast' or 'full'"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     dir_name = dir_path.rstrip("/").split("/")[-1] or "root"
     github_scan = GitHubScan.objects.create(
         user=request.user,
         repo_name=f"local:{dir_name}",
         repo_url=dir_path,
         scan_source="local",
+        scan_mode=scan_mode,
         scan_status="scanning",
     )
     _dispatch_background_task(
-        run_local_scan, github_scan.id, dir_path, user_id=request.user.id
+        run_local_scan,
+        github_scan.id,
+        dir_path,
+        user_id=request.user.id,
+        scan_mode=scan_mode,
     )
     return Response(
         GitHubScanListSerializer(github_scan).data,

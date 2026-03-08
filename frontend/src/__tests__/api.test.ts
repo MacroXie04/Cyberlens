@@ -193,7 +193,15 @@ describe("scanner API functions", () => {
     await api.triggerScan("org/repo");
 
     const [, init] = mockFetch.mock.calls[0];
-    expect(JSON.parse(init.body)).toEqual({ repo: "org/repo" });
+    expect(JSON.parse(init.body)).toEqual({ repo: "org/repo", scan_mode: "fast" });
+  });
+
+  it("getScanHistory fetches the repo-scoped history endpoint", async () => {
+    mockFetch.mockReturnValueOnce(jsonResponse([]));
+
+    await api.getScanHistory("org/repo");
+
+    expect(mockFetch.mock.calls[0][0]).toBe("/api/github/scans/?repo=org%2Frepo");
   });
 
   it("getScanResults fetches correct URL", async () => {

@@ -1,56 +1,59 @@
-import type { GcpEstateSummary } from "../../types";
-import { socColors } from "../../theme/theme";
+import type { GcpEstateSummary, LiveMonitorMode } from "../../types";
+import { socColors, typography } from "../../theme/theme";
 
 interface Props {
   summary: GcpEstateSummary | null;
+  mode: LiveMonitorMode;
+  replayWindowLabel: string;
 }
 
 interface KpiCard {
   label: string;
-  value: number | string;
-  color: string;
-  bgColor: string;
+  value: number;
+  tone: "critical" | "high" | "medium" | "safe";
+  supporting: string;
 }
 
-export default function HeroKpiRow({ summary }: Props) {
-  const s = summary;
-
+export default function HeroKpiRow({ summary, mode, replayWindowLabel }: Props) {
   const cards: KpiCard[] = [
     {
       label: "Active Incidents",
-      value: s?.active_incidents ?? 0,
-      color: socColors.critical,
-      bgColor: socColors.criticalBg,
+      value: summary?.active_incidents ?? 0,
+      tone: "critical",
+      supporting:
+        mode === "live"
+          ? "Open or investigating now"
+          : `Visible in ${replayWindowLabel}`,
     },
     {
       label: "Services Under Attack",
-      value: s?.services_under_attack ?? 0,
-      color: socColors.high,
-      bgColor: socColors.highBg,
+      value: summary?.services_under_attack ?? 0,
+      tone: "high",
+      supporting: "Distinct services with high or critical events",
     },
     {
       label: "Armor Blocks",
-      value: s?.armor_blocks_recent ?? 0,
-      color: socColors.medium,
-      bgColor: socColors.mediumBg,
+      value: summary?.armor_blocks_recent ?? 0,
+      tone: "medium",
+      supporting: "Cloud Armor prevented requests in the replay window",
     },
     {
       label: "Auth Failures",
-      value: s?.auth_failures_recent ?? 0,
-      color: socColors.high,
-      bgColor: socColors.highBg,
+      value: summary?.auth_failures_recent ?? 0,
+      tone: "high",
+      supporting: "IAP and credential abuse indicators",
     },
     {
-      label: "5xx Errors",
-      value: s?.error_events_recent ?? 0,
-      color: socColors.critical,
-      bgColor: socColors.criticalBg,
+      label: "Error Surges",
+      value: summary?.error_events_recent ?? 0,
+      tone: "critical",
+      supporting: "Error burst detections in logs and metrics",
     },
     {
       label: "Unhealthy Revisions",
-      value: s?.unhealthy_revisions ?? 0,
-      color: socColors.medium,
-      bgColor: socColors.mediumBg,
+      value: summary?.unhealthy_revisions ?? 0,
+      tone: "safe",
+      supporting: "Services over the error threshold",
     },
   ];
 
@@ -58,46 +61,93 @@ export default function HeroKpiRow({ summary }: Props) {
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "repeat(6, 1fr)",
-        gap: 12,
+        gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+        gap: 14,
       }}
     >
-      {cards.map((card, i) => (
-        <div
-          key={i}
-          style={{
-            background: socColors.bgCard,
-            border: `1px solid ${socColors.border}`,
-            borderRadius: 8,
-            padding: "14px 16px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 6,
-          }}
-        >
-          <span
+      {cards.map((card) => {
+        const styles = toneStyles(card.tone);
+        return (
+          <div
+            key={card.label}
             style={{
-              fontSize: 11,
-              color: socColors.textDim,
-              textTransform: "uppercase",
-              letterSpacing: "0.5px",
+              background: socColors.bgCard,
+              border: `1px solid ${socColors.border}`,
+              borderRadius: 28,
+              padding: 18,
+              boxShadow: "0 1px 2px rgba(15, 23, 42, 0.05)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
             }}
           >
-            {card.label}
-          </span>
-          <span
-            style={{
-              fontSize: 28,
-              fontWeight: 700,
-              color: card.color,
-              fontVariantNumeric: "tabular-nums",
-              lineHeight: 1,
-            }}
-          >
-            {card.value}
-          </span>
-        </div>
-      ))}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: socColors.textMuted,
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {card.label}
+                </div>
+                <div
+                  style={{
+                    marginTop: 10,
+                    fontSize: 36,
+                    lineHeight: 1,
+                    fontWeight: 700,
+                    color: styles.text,
+                    fontFamily: typography.fontDisplay,
+                  }}
+                >
+                  {card.value}
+                </div>
+              </div>
+
+              <span
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 999,
+                  background: styles.background,
+                  color: styles.text,
+                  fontSize: 11,
+                  fontWeight: 700,
+                }}
+              >
+                {card.value === 0 ? "Stable" : "Active"}
+              </span>
+            </div>
+
+            <div style={{ fontSize: 13, color: socColors.textDim, lineHeight: 1.5 }}>
+              {card.supporting}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
+}
+
+function toneStyles(tone: KpiCard["tone"]) {
+  switch (tone) {
+    case "critical":
+      return { text: socColors.critical, background: socColors.criticalBg };
+    case "high":
+      return { text: socColors.high, background: socColors.highBg };
+    case "medium":
+      return { text: socColors.medium, background: socColors.mediumBg };
+    default:
+      return { text: socColors.safe, background: socColors.safeBg };
+  }
 }

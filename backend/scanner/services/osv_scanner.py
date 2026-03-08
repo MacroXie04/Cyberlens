@@ -2,6 +2,7 @@ import logging
 
 import requests
 from celery import shared_task
+from django.utils import timezone
 
 from monitor.services.redis_publisher import publish_scan_complete, publish_scan_progress
 from scanner.models import Dependency, GitHubScan, Vulnerability
@@ -46,7 +47,15 @@ def query_osv(deps: list[dict]) -> list[dict]:
         return []
 
 
-def _run_scan_pipeline(scan_id, dep_files, dir_path="", pat="", repo_full_name="", user_id=None):
+def _run_scan_pipeline(
+    scan_id,
+    dep_files,
+    dir_path="",
+    pat="",
+    repo_full_name="",
+    user_id=None,
+    scan_mode=GitHubScan.Mode.FAST,
+):
     """Scan pipeline: parse -> OSV -> AI report -> code scan."""
     scan = GitHubScan.objects.get(id=scan_id)
 
@@ -165,18 +174,27 @@ def _run_scan_pipeline(scan_id, dep_files, dir_path="", pat="", repo_full_name="
     scan.save(update_fields=["code_security_score", "security_score"])
 
     scan.scan_status = "completed"
-    scan.save()
+    scan.completed_at = timezone.now()
+    scan.error_message = ""
+    scan.save(update_fields=["scan_status", "completed_at", "error_message"])
 
     publish_scan_complete({"scan_id": scan_id, "status": "completed", "message": "Scan complete"})
 
 
 @shared_task
-def run_full_scan(scan_id, pat, repo_full_name, user_id=None):
+def run_full_scan(scan_id, pat, repo_full_name, user_id=None, scan_mode=GitHubScan.Mode.FAST):
     """GitHub scan entry point."""
     try:
         publish_scan_progress({"scan_id": scan_id, "step": "fetching", "message": "Fetching dependency files from GitHub..."})
         dep_files = get_dependency_files(pat, repo_full_name)
-        _run_scan_pipeline(scan_id, dep_files, pat=pat, repo_full_name=repo_full_name, user_id=user_id)
+        _run_scan_pipeline(
+            scan_id,
+            dep_files,
+            pat=pat,
+            repo_full_name=repo_full_name,
+            user_id=user_id,
+            scan_mode=scan_mode,
+        )
     except Exception as exc:
         logger.exception("Full scan failed for %s", repo_full_name)
         error_msg = str(exc)
@@ -184,7 +202,8 @@ def run_full_scan(scan_id, pat, repo_full_name, user_id=None):
             scan = GitHubScan.objects.get(id=scan_id)
             scan.scan_status = "failed"
             scan.error_message = error_msg
-            scan.save(update_fields=["scan_status", "error_message"])
+            scan.completed_at = timezone.now()
+            scan.save(update_fields=["scan_status", "error_message", "completed_at"])
         except GitHubScan.DoesNotExist:
             pass
         publish_scan_complete({"scan_id": scan_id, "status": "failed", "message": error_msg})
@@ -193,13 +212,19 @@ def run_full_scan(scan_id, pat, repo_full_name, user_id=None):
 
 
 @shared_task
-def run_local_scan(scan_id, dir_path, user_id=None):
+def run_local_scan(scan_id, dir_path, user_id=None, scan_mode=GitHubScan.Mode.FAST):
     """Local directory scan entry point."""
     from .local_client import get_local_dependency_files  # noqa: E402
     try:
         publish_scan_progress({"scan_id": scan_id, "step": "fetching", "message": "Reading local dependency files..."})
         dep_files = get_local_dependency_files(dir_path)
-        _run_scan_pipeline(scan_id, dep_files, dir_path=dir_path, user_id=user_id)
+        _run_scan_pipeline(
+            scan_id,
+            dep_files,
+            dir_path=dir_path,
+            user_id=user_id,
+            scan_mode=scan_mode,
+        )
     except Exception as exc:
         logger.exception("Local scan failed for %s", dir_path)
         error_msg = str(exc)
@@ -207,7 +232,8 @@ def run_local_scan(scan_id, dir_path, user_id=None):
             scan = GitHubScan.objects.get(id=scan_id)
             scan.scan_status = "failed"
             scan.error_message = error_msg
-            scan.save(update_fields=["scan_status", "error_message"])
+            scan.completed_at = timezone.now()
+            scan.save(update_fields=["scan_status", "error_message", "completed_at"])
         except GitHubScan.DoesNotExist:
             pass
         publish_scan_complete({"scan_id": scan_id, "status": "failed", "message": error_msg})

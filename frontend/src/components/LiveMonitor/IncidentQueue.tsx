@@ -1,8 +1,10 @@
-import type { GcpSecurityIncident } from "../../types";
+import type { GcpSecurityIncident, LiveMonitorMode } from "../../types";
 import { socColors } from "../../theme/theme";
 
 interface Props {
   incidents: GcpSecurityIncident[];
+  mode: LiveMonitorMode;
+  replayWindowLabel: string;
   selectedIncidentId: number | null;
   onSelectIncident: (incident: GcpSecurityIncident) => void;
 }
@@ -11,15 +13,7 @@ const priorityColors: Record<string, string> = {
   p1: socColors.critical,
   p2: socColors.high,
   p3: socColors.medium,
-  p4: socColors.p4,
-};
-
-const statusLabels: Record<string, string> = {
-  open: "OPEN",
-  investigating: "INVESTIGATING",
-  mitigated: "MITIGATED",
-  resolved: "RESOLVED",
-  false_positive: "FP",
+  p4: socColors.textDim,
 };
 
 function timeAgo(ts: string): string {
@@ -38,6 +32,8 @@ function timeAgo(ts: string): string {
 
 export default function IncidentQueue({
   incidents,
+  mode,
+  replayWindowLabel,
   selectedIncidentId,
   onSelectIncident,
 }: Props) {
@@ -46,151 +42,152 @@ export default function IncidentQueue({
       style={{
         background: socColors.bgCard,
         border: `1px solid ${socColors.border}`,
-        borderRadius: 8,
+        borderRadius: 32,
         overflow: "hidden",
-        display: "flex",
-        flexDirection: "column",
+        minHeight: 360,
       }}
     >
       <div
         style={{
-          padding: "10px 16px",
+          padding: "18px 20px 14px",
           borderBottom: `1px solid ${socColors.border}`,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
+          gap: 10,
+          flexWrap: "wrap",
         }}
       >
-        <span
+        <div>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              color: socColors.textMuted,
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+            }}
+          >
+            Incident Queue
+          </div>
+          <div style={{ marginTop: 6, fontSize: 13, color: socColors.textDim }}>
+            {mode === "live"
+              ? "Open operational and security incidents"
+              : `Incidents intersecting ${replayWindowLabel}`}
+          </div>
+        </div>
+        <div
           style={{
+            padding: "10px 14px",
+            borderRadius: 999,
+            background: incidents.length ? socColors.criticalBg : socColors.safeBg,
+            color: incidents.length ? socColors.critical : socColors.safe,
             fontSize: 12,
-            color: socColors.textDim,
-            fontWeight: 600,
-            textTransform: "uppercase",
-            letterSpacing: "0.5px",
-          }}
-        >
-          Incident Queue
-        </span>
-        <span
-          style={{
-            fontSize: 12,
-            color: incidents.length > 0 ? socColors.critical : socColors.safe,
-            fontWeight: 600,
+            fontWeight: 700,
           }}
         >
           {incidents.length}
-        </span>
+        </div>
       </div>
-      <div style={{ maxHeight: 300, overflowY: "auto" }}>
+
+      <div style={{ display: "flex", flexDirection: "column" }}>
         {incidents.length === 0 ? (
           <div
             style={{
-              padding: 20,
+              minHeight: 240,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 24,
               textAlign: "center",
               color: socColors.textDim,
-              fontSize: 12,
+              fontSize: 14,
             }}
           >
-            No active incidents
+            No incidents in the selected window
           </div>
         ) : (
-          incidents.map((inc) => (
-            <div
-              key={inc.id}
-              onClick={() => onSelectIncident(inc)}
-              style={{
-                padding: "10px 16px",
-                borderBottom: `1px solid ${socColors.border}`,
-                cursor: "pointer",
-                background:
-                  selectedIncidentId === inc.id
-                    ? socColors.bgCardHover
-                    : "transparent",
-                transition: "background 100ms",
-                borderLeft: `3px solid ${priorityColors[inc.priority] || socColors.border}`,
-              }}
-              onMouseEnter={(e) => {
-                if (selectedIncidentId !== inc.id) {
-                  e.currentTarget.style.background = socColors.bgCardHover;
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (selectedIncidentId !== inc.id) {
-                  e.currentTarget.style.background = "transparent";
-                }
-              }}
-            >
-              {/* Top row */}
-              <div
+          incidents.map((incident) => {
+            const selected = selectedIncidentId === incident.id;
+            return (
+              <button
+                key={incident.id}
+                type="button"
+                onClick={() => onSelectIncident(incident)}
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  marginBottom: 4,
+                  border: "none",
+                  textAlign: "left",
+                  background: selected ? socColors.bgCardHover : "transparent",
+                  padding: "18px 20px",
+                  borderBottom: `1px solid ${socColors.border}`,
+                  cursor: "pointer",
                 }}
               >
-                <span
+                <div
                   style={{
-                    fontSize: 10,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        minWidth: 36,
+                        padding: "6px 9px",
+                        borderRadius: 999,
+                        background: socColors.bgPanel,
+                        color: priorityColors[incident.priority] || socColors.text,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {incident.priority}
+                    </span>
+                    <span style={{ fontSize: 12, color: socColors.textDim, textTransform: "capitalize" }}>
+                      {incident.status}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 12, color: socColors.textDim }}>
+                    {timeAgo(incident.last_seen)}
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 12,
+                    fontSize: 15,
                     fontWeight: 700,
-                    color: priorityColors[inc.priority] || socColors.text,
-                    textTransform: "uppercase",
+                    color: socColors.text,
+                    lineHeight: 1.4,
                   }}
                 >
-                  {inc.priority}
-                </span>
-                <span
+                  {incident.title}
+                </div>
+
+                <div
                   style={{
-                    fontSize: 10,
-                    color: socColors.textDim,
-                    textTransform: "uppercase",
-                  }}
-                >
-                  {statusLabels[inc.status] || inc.status}
-                </span>
-                <span
-                  style={{
-                    marginLeft: "auto",
-                    fontSize: 10,
+                    marginTop: 10,
+                    display: "flex",
+                    gap: 12,
+                    flexWrap: "wrap",
+                    fontSize: 12,
                     color: socColors.textDim,
                   }}
                 >
-                  {timeAgo(inc.last_seen)}
-                </span>
-              </div>
-              {/* Title */}
-              <div
-                style={{
-                  fontSize: 12,
-                  fontWeight: 500,
-                  color: socColors.text,
-                  marginBottom: 4,
-                }}
-              >
-                {inc.title}
-              </div>
-              {/* Bottom meta */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  fontSize: 10,
-                  color: socColors.textDim,
-                }}
-              >
-                <span>{inc.evidence_count} events</span>
-                <span>
-                  {inc.services_affected.length} service
-                  {inc.services_affected.length !== 1 ? "s" : ""}
-                </span>
-                <span>
-                  {((inc.confidence ?? 0) * 100).toFixed(0)}% confidence
-                </span>
-              </div>
-            </div>
-          ))
+                  <span>{incident.evidence_count} events</span>
+                  <span>{incident.services_affected.length} services</span>
+                  <span>{Math.round((incident.confidence ?? 0) * 100)}% confidence</span>
+                </div>
+              </button>
+            );
+          })
         )}
       </div>
     </div>

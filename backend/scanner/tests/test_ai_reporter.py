@@ -5,15 +5,23 @@ from scanner.models import GitHubScan, AiReport, Dependency, Vulnerability
 
 @pytest.mark.django_db
 class TestGenerateReport:
+    @patch(
+        "cyberlens.utils.probe_gemini_api_connection",
+        return_value={"success": True, "message": "ok", "error_type": "", "status_code": 200},
+    )
     @patch("cyberlens.utils.get_google_api_key", return_value="")
-    def test_no_api_key(self, mock_get_key):
+    def test_no_api_key(self, mock_get_key, mock_probe):
         from scanner.services.ai_reporter import generate_report
         scan = GitHubScan.objects.create(repo_name="test/repo", repo_url="url", scan_status="scanning")
         generate_report(scan)
         assert AiReport.objects.count() == 0
 
+    @patch(
+        "cyberlens.utils.probe_gemini_api_connection",
+        return_value={"success": True, "message": "ok", "error_type": "", "status_code": 200},
+    )
     @patch("cyberlens.utils.get_google_api_key", return_value="test-key")
-    def test_no_vulns_creates_clean_report(self, mock_get_key, scan_factory):
+    def test_no_vulns_creates_clean_report(self, mock_get_key, mock_probe, scan_factory):
         scan = scan_factory(scan_status="scanning")
         from scanner.services.ai_reporter import generate_report
         generate_report(scan)
@@ -23,9 +31,13 @@ class TestGenerateReport:
         scan.refresh_from_db()
         assert scan.security_score == 100
 
+    @patch(
+        "cyberlens.utils.probe_gemini_api_connection",
+        return_value={"success": True, "message": "ok", "error_type": "", "status_code": 200},
+    )
     @patch("scanner.services.ai_reporter.InMemoryRunner")
     @patch("cyberlens.utils.get_google_api_key", return_value="test-key")
-    def test_with_vulns(self, mock_get_key, mock_runner_cls, scan_factory, dependency_factory, vulnerability_factory):
+    def test_with_vulns(self, mock_get_key, mock_runner_cls, mock_probe, scan_factory, dependency_factory, vulnerability_factory):
         scan = scan_factory(scan_status="scanning")
         dep = dependency_factory(scan, is_vulnerable=True)
         vulnerability_factory(dep)
@@ -45,9 +57,13 @@ class TestGenerateReport:
         scan.refresh_from_db()
         assert scan.security_score == 65
 
+    @patch(
+        "cyberlens.utils.probe_gemini_api_connection",
+        return_value={"success": True, "message": "ok", "error_type": "", "status_code": 200},
+    )
     @patch("scanner.services.ai_reporter.InMemoryRunner", side_effect=Exception("AI down"))
     @patch("cyberlens.utils.get_google_api_key", return_value="test-key")
-    def test_ai_failure_no_crash(self, mock_get_key, mock_runner_cls, scan_factory, dependency_factory, vulnerability_factory):
+    def test_ai_failure_no_crash(self, mock_get_key, mock_runner_cls, mock_probe, scan_factory, dependency_factory, vulnerability_factory):
         scan = scan_factory(scan_status="scanning")
         dep = dependency_factory(scan, is_vulnerable=True)
         vulnerability_factory(dep)

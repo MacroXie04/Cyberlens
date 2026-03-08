@@ -1,7 +1,12 @@
-import { socColors } from "../../theme/theme";
+import type { CSSProperties } from "react";
+
+import type { GcpHistoryStatus, LiveMonitorMode } from "../../types";
+import { socColors, typography } from "../../theme/theme";
 
 interface Props {
   projectId: string;
+  mode: LiveMonitorMode;
+  historyStatus: GcpHistoryStatus | null;
   selectedRegion: string;
   regions: string[];
   selectedService: string;
@@ -12,12 +17,23 @@ interface Props {
   socketConnected: boolean;
   lastSync: string | null;
   refreshing?: boolean;
-  onRegionChange: (v: string) => void;
-  onServiceChange: (v: string) => void;
-  onSourceChange: (v: string) => void;
-  onSeverityChange: (v: string) => void;
-  onTimeRangeChange: (v: number) => void;
+  replayCursor: string | null;
+  timelineStart: string | null;
+  timelineEnd: string | null;
+  playbackSpeed: number;
+  isPlaying: boolean;
+  onModeChange: (mode: LiveMonitorMode) => void;
+  onRegionChange: (value: string) => void;
+  onServiceChange: (value: string) => void;
+  onSourceChange: (value: string) => void;
+  onSeverityChange: (value: string) => void;
+  onTimeRangeChange: (value: number) => void;
   onRefresh: () => void;
+  onReplayCursorChange: (value: string) => void;
+  onTogglePlayback: () => void;
+  onPlaybackSpeedChange: (value: number) => void;
+  onJumpStart: () => void;
+  onJumpNow: () => void;
 }
 
 const TIME_OPTIONS = [
@@ -32,6 +48,7 @@ const TIME_OPTIONS = [
 const SOURCE_OPTIONS = [
   { label: "All Sources", value: "" },
   { label: "Cloud Run", value: "cloud_run_logs" },
+  { label: "Cloud Monitoring", value: "cloud_monitoring" },
   { label: "Load Balancer", value: "load_balancer" },
   { label: "Cloud Armor", value: "cloud_armor" },
   { label: "IAM Audit", value: "iam_audit" },
@@ -39,26 +56,102 @@ const SOURCE_OPTIONS = [
 ];
 
 const SEVERITY_OPTIONS = [
-  { label: "All", value: "" },
+  { label: "All Severities", value: "" },
   { label: "Critical", value: "critical" },
   { label: "High", value: "high" },
   { label: "Medium", value: "medium" },
   { label: "Low", value: "low" },
+  { label: "Info", value: "info" },
 ];
 
-const selectStyle: React.CSSProperties = {
+const SPEED_OPTIONS = [1, 4, 16];
+
+const selectStyle: CSSProperties = {
+  minWidth: 132,
   background: socColors.bgCard,
   color: socColors.text,
   border: `1px solid ${socColors.border}`,
-  borderRadius: 6,
-  padding: "4px 8px",
-  fontSize: 12,
-  cursor: "pointer",
+  borderRadius: 16,
+  padding: "10px 14px",
+  fontSize: 13,
   outline: "none",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.65)",
 };
+
+const controlGroupStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "10px 12px",
+  borderRadius: 20,
+  background: socColors.bgCard,
+  border: `1px solid ${socColors.border}`,
+  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+};
+
+function formatCoverage(value: string | null): string {
+  if (!value) return "No coverage";
+  try {
+    return new Date(value).toLocaleDateString([], {
+      month: "short",
+      day: "numeric",
+    });
+  } catch {
+    return value;
+  }
+}
+
+function formatCursorLabel(value: string | null): string {
+  if (!value) return "Cursor unavailable";
+  try {
+    return new Date(value).toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return value;
+  }
+}
+
+function backfillLabel(historyStatus: GcpHistoryStatus | null): string {
+  const status = historyStatus?.backfill_status?.status;
+  if (status === "running") return "Backfill running";
+  if (status === "failed") return "Backfill failed";
+  if (status === "complete") return "History ready";
+  if (historyStatus?.history_ready) return "History ready";
+  return "Waiting for history";
+}
+
+function sliderValue(
+  replayCursor: string | null,
+  timelineStart: string | null,
+  timelineEnd: string | null
+): { min: number; max: number; value: number; step: number; disabled: boolean } {
+  if (!timelineStart || !timelineEnd) {
+    return { min: 0, max: 100, value: 100, step: 1, disabled: true };
+  }
+  const min = new Date(timelineStart).getTime();
+  const max = new Date(timelineEnd).getTime();
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
+    return { min: 0, max: 100, value: 100, step: 1, disabled: true };
+  }
+  const rawValue = replayCursor ? new Date(replayCursor).getTime() : max;
+  const value = Math.max(min, Math.min(max, rawValue));
+  return {
+    min,
+    max,
+    value,
+    step: Math.max(1, Math.floor((max - min) / 240)),
+    disabled: false,
+  };
+}
 
 export default function CommandBar({
   projectId,
+  mode,
+  historyStatus,
   selectedRegion,
   regions,
   selectedService,
@@ -69,154 +162,389 @@ export default function CommandBar({
   socketConnected,
   lastSync,
   refreshing,
+  replayCursor,
+  timelineStart,
+  timelineEnd,
+  playbackSpeed,
+  isPlaying,
+  onModeChange,
   onRegionChange,
   onServiceChange,
   onSourceChange,
   onSeverityChange,
   onTimeRangeChange,
   onRefresh,
+  onReplayCursorChange,
+  onTogglePlayback,
+  onPlaybackSpeedChange,
+  onJumpStart,
+  onJumpNow,
 }: Props) {
+  const scrubber = sliderValue(replayCursor, timelineStart, timelineEnd);
+
   return (
     <div
       style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        padding: "8px 16px",
-        background: socColors.bgPanel,
+        position: "sticky",
+        top: 0,
+        zIndex: 20,
+        padding: "20px 20px 14px",
+        background:
+          "linear-gradient(180deg, rgba(247,249,252,0.98) 0%, rgba(247,249,252,0.94) 70%, rgba(247,249,252,0.84) 100%)",
+        backdropFilter: "blur(18px)",
         borderBottom: `1px solid ${socColors.border}`,
-        flexWrap: "wrap",
       }}
     >
-      {/* Project ID */}
-      <span style={{ color: socColors.accent, fontWeight: 600, fontSize: 13 }}>
-        {projectId || "No Project"}
-      </span>
-
-      <div style={{ width: 1, height: 20, background: socColors.border }} />
-
-      {/* Region filter */}
-      <select
-        value={selectedRegion}
-        onChange={(e) => onRegionChange(e.target.value)}
-        style={selectStyle}
-      >
-        <option value="">All Regions</option>
-        {regions.map((r) => (
-          <option key={r} value={r}>
-            {r}
-          </option>
-        ))}
-      </select>
-
-      {/* Service filter */}
-      <select
-        value={selectedService}
-        onChange={(e) => onServiceChange(e.target.value)}
-        style={selectStyle}
-      >
-        <option value="">All Services</option>
-        {services.map((s) => (
-          <option key={s} value={s}>
-            {s}
-          </option>
-        ))}
-      </select>
-
-      {/* Source filter */}
-      <select
-        value={selectedSource}
-        onChange={(e) => onSourceChange(e.target.value)}
-        style={selectStyle}
-      >
-        {SOURCE_OPTIONS.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-
-      {/* Severity filter */}
-      <select
-        value={selectedSeverity}
-        onChange={(e) => onSeverityChange(e.target.value)}
-        style={selectStyle}
-      >
-        {SEVERITY_OPTIONS.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-
-      {/* Time range */}
-      <div style={{ display: "flex", gap: 2 }}>
-        {TIME_OPTIONS.map((o) => (
-          <button
-            key={o.value}
-            onClick={() => onTimeRangeChange(o.value)}
-            style={{
-              background:
-                timeRange === o.value ? socColors.accent : "transparent",
-              color:
-                timeRange === o.value ? socColors.bg : socColors.textMuted,
-              border: `1px solid ${timeRange === o.value ? socColors.accent : socColors.border}`,
-              borderRadius: 4,
-              padding: "3px 8px",
-              fontSize: 11,
-              cursor: "pointer",
-              fontWeight: timeRange === o.value ? 600 : 400,
-            }}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
-
-      <div style={{ flex: 1 }} />
-
-      {/* Socket status */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <div
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: "50%",
-            background: socketConnected ? socColors.safe : socColors.critical,
-            boxShadow: socketConnected
-              ? `0 0 6px ${socColors.safe}`
-              : `0 0 6px ${socColors.critical}`,
-          }}
-        />
-        <span style={{ fontSize: 11, color: socColors.textDim }}>
-          {socketConnected ? "LIVE" : "DISCONNECTED"}
-        </span>
-      </div>
-
-      {/* Last sync */}
-      {lastSync && (
-        <span style={{ fontSize: 11, color: socColors.textDim }}>
-          {lastSync}
-        </span>
-      )}
-
-      {/* Refresh */}
-      <button
-        onClick={onRefresh}
-        disabled={refreshing}
+      <div
         style={{
-          background: "transparent",
-          color: refreshing ? socColors.textDim : socColors.accent,
+          background:
+            "linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(244,247,252,0.98) 100%)",
           border: `1px solid ${socColors.border}`,
-          borderRadius: 6,
-          padding: "4px 10px",
-          fontSize: 12,
-          cursor: refreshing ? "not-allowed" : "pointer",
-          opacity: refreshing ? 0.6 : 1,
+          borderRadius: 32,
+          padding: 18,
+          boxShadow: socColors.shadow,
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
         }}
       >
-        {refreshing ? "Refreshing\u2026" : "Refresh"}
-      </button>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+            <div>
+              <div
+                style={{
+                  fontFamily: typography.fontDisplay,
+                  fontSize: 14,
+                  fontWeight: 700,
+                  letterSpacing: "0.02em",
+                  color: socColors.text,
+                }}
+              >
+                Live Monitor
+              </div>
+              <div style={{ fontSize: 13, color: socColors.textMuted, marginTop: 2 }}>
+                {projectId || "No project selected"} · Coverage {formatCoverage(historyStatus?.coverage_start ?? null)} to{" "}
+                {formatCoverage(historyStatus?.coverage_end ?? null)}
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "inline-flex",
+                padding: 4,
+                borderRadius: 999,
+                background: socColors.bgPanel,
+                border: `1px solid ${socColors.border}`,
+              }}
+            >
+              {(["history", "live"] as const).map((candidate) => {
+                const selected = mode === candidate;
+                return (
+                  <button
+                    key={candidate}
+                    type="button"
+                    onClick={() => onModeChange(candidate)}
+                    style={{
+                      border: "none",
+                      background: selected ? socColors.bgCard : "transparent",
+                      color: selected ? socColors.accent : socColors.textMuted,
+                      padding: "10px 16px",
+                      borderRadius: 999,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      boxShadow: selected ? "0 2px 10px rgba(11, 87, 208, 0.12)" : "none",
+                      textTransform: "capitalize",
+                    }}
+                  >
+                    {candidate}
+                  </button>
+                );
+              })}
+            </div>
+
+            <StatusChip
+              label={mode === "live" ? (socketConnected ? "Live stream connected" : "Live stream reconnecting") : backfillLabel(historyStatus)}
+              tone={mode === "live" ? (socketConnected ? "safe" : "critical") : historyStatus?.backfill_status?.status === "failed" ? "critical" : historyStatus?.backfill_status?.status === "running" ? "accent" : "info"}
+            />
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            {lastSync && (
+              <span style={{ fontSize: 12, color: socColors.textDim }}>
+                Synced {lastSync}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={refreshing}
+              style={{
+                border: "none",
+                borderRadius: 999,
+                padding: "11px 18px",
+                background: socColors.accent,
+                color: "#fff",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: refreshing ? "not-allowed" : "pointer",
+                opacity: refreshing ? 0.6 : 1,
+                boxShadow: "0 10px 24px rgba(11, 87, 208, 0.18)",
+              }}
+              aria-label="Refresh Live Monitor"
+            >
+              {refreshing ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <select
+            aria-label="Region filter"
+            value={selectedRegion}
+            onChange={(event) => onRegionChange(event.target.value)}
+            style={selectStyle}
+          >
+            <option value="">All Regions</option>
+            {regions.map((region) => (
+              <option key={region} value={region}>
+                {region}
+              </option>
+            ))}
+          </select>
+
+          <select
+            aria-label="Service filter"
+            value={selectedService}
+            onChange={(event) => onServiceChange(event.target.value)}
+            style={selectStyle}
+          >
+            <option value="">All Services</option>
+            {services.map((service) => (
+              <option key={service} value={service}>
+                {service}
+              </option>
+            ))}
+          </select>
+
+          <select
+            aria-label="Source filter"
+            value={selectedSource}
+            onChange={(event) => onSourceChange(event.target.value)}
+            style={selectStyle}
+          >
+            {SOURCE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+
+          <select
+            aria-label="Severity filter"
+            value={selectedSeverity}
+            onChange={(event) => onSeverityChange(event.target.value)}
+            style={selectStyle}
+          >
+            {SEVERITY_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+
+          <div style={controlGroupStyle}>
+            {TIME_OPTIONS.map((option) => {
+              const selected = timeRange === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => onTimeRangeChange(option.value)}
+                  style={{
+                    border: "none",
+                    background: selected ? socColors.accentSoft : "transparent",
+                    color: selected ? socColors.accent : socColors.textMuted,
+                    borderRadius: 999,
+                    padding: "8px 10px",
+                    fontSize: 12,
+                    fontWeight: selected ? 700 : 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div
+            style={{
+              ...controlGroupStyle,
+              flex: "1 1 340px",
+              minWidth: 280,
+            }}
+          >
+            <button
+              type="button"
+              onClick={onJumpStart}
+              disabled={scrubber.disabled}
+              style={iconButtonStyle(scrubber.disabled)}
+              aria-label="Jump to range start"
+            >
+              Start
+            </button>
+            <button
+              type="button"
+              onClick={onTogglePlayback}
+              disabled={scrubber.disabled}
+              style={iconButtonStyle(scrubber.disabled)}
+              aria-label={isPlaying ? "Pause replay" : "Play replay"}
+            >
+              {isPlaying ? "Pause" : "Play"}
+            </button>
+            <button
+              type="button"
+              onClick={onJumpNow}
+              disabled={scrubber.disabled}
+              style={iconButtonStyle(scrubber.disabled)}
+              aria-label="Jump to most recent timestamp"
+            >
+              Now
+            </button>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {SPEED_OPTIONS.map((speed) => (
+                <button
+                  key={speed}
+                  type="button"
+                  onClick={() => onPlaybackSpeedChange(speed)}
+                  style={{
+                    border: "none",
+                    borderRadius: 999,
+                    padding: "6px 8px",
+                    background:
+                      playbackSpeed === speed ? socColors.accentSoft : "transparent",
+                    color:
+                      playbackSpeed === speed ? socColors.accent : socColors.textMuted,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  {speed}x
+                </button>
+              ))}
+            </div>
+
+            <div style={{ flex: 1, minWidth: 160 }}>
+              <input
+                aria-label="Replay cursor"
+                type="range"
+                min={scrubber.min}
+                max={scrubber.max}
+                step={scrubber.step}
+                value={scrubber.value}
+                disabled={scrubber.disabled}
+                onChange={(event) =>
+                  onReplayCursorChange(new Date(Number(event.target.value)).toISOString())
+                }
+                style={{ width: "100%", accentColor: socColors.accent }}
+              />
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  marginTop: 4,
+                  gap: 12,
+                  fontSize: 11,
+                  color: socColors.textDim,
+                  fontFamily: typography.fontMono,
+                }}
+              >
+                <span>{timelineStart ? formatCursorLabel(timelineStart) : "No range"}</span>
+                <span>{formatCursorLabel(replayCursor)}</span>
+                <span>{timelineEnd ? formatCursorLabel(timelineEnd) : "No range"}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
+  );
+}
+
+function iconButtonStyle(disabled: boolean): CSSProperties {
+  return {
+    border: "none",
+    borderRadius: 999,
+    padding: "8px 12px",
+    background: disabled ? socColors.bgPanel : socColors.accentSoft,
+    color: disabled ? socColors.textDim : socColors.accent,
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: disabled ? "not-allowed" : "pointer",
+  };
+}
+
+function StatusChip({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: "critical" | "safe" | "info" | "accent";
+}) {
+  const colorMap = {
+    critical: socColors.critical,
+    safe: socColors.safe,
+    info: socColors.textMuted,
+    accent: socColors.accent,
+  };
+  const backgroundMap = {
+    critical: socColors.criticalBg,
+    safe: socColors.safeBg,
+    info: socColors.infoBg,
+    accent: socColors.accentSoft,
+  };
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "10px 14px",
+        borderRadius: 999,
+        background: backgroundMap[tone],
+        color: colorMap[tone],
+        fontSize: 12,
+        fontWeight: 700,
+      }}
+    >
+      <span
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: "50%",
+          background: colorMap[tone],
+        }}
+      />
+      {label}
+    </span>
   );
 }

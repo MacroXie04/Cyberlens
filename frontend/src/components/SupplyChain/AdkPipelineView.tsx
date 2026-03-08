@@ -10,6 +10,7 @@ import type {
   CodeScanStreamEvent,
   GitHubScan,
 } from "../../types";
+import { deriveAgentActivity } from "./activity";
 
 interface Props {
   snapshot: AdkTraceSnapshot | null;
@@ -496,13 +497,6 @@ function buildVerificationOutcomes(snapshot: AdkTraceSnapshot): VerificationOutc
     .sort((left, right) => right.sequence - left.sequence);
 }
 
-function latestAgentEvents(snapshot: AdkTraceSnapshot): AdkTraceEvent[] {
-  return [...snapshot.events]
-    .filter((event) => event.kind !== "metric")
-    .slice(-5)
-    .reverse();
-}
-
 export default function AdkPipelineView({
   snapshot,
   loading = false,
@@ -591,8 +585,7 @@ export default function AdkPipelineView({
   const counts = artifactCounts(snapshot.artifacts, verificationOutcomes);
   const liveTokenEvent = findLatestTokenEvent(codeScanStreamEvents);
   const selectedPayload = selectedEvent && isRecord(selectedEvent.payload_json) ? selectedEvent.payload_json : null;
-  const recentAgentEvents = latestAgentEvents(snapshot);
-  const latestAgentEvent = recentAgentEvents[0] || null;
+  const activity = deriveAgentActivity(snapshot, scan, codeScanStreamEvents);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -658,7 +651,7 @@ export default function AdkPipelineView({
             <div style={{ fontSize: 13, fontWeight: 700, color: "var(--md-on-surface)", marginBottom: 10 }}>
               Agent Activity
             </div>
-            {!latestAgentEvent ? (
+            {activity.recent_events.length === 0 ? (
               <div style={{ fontSize: 12, color: "var(--md-on-surface-variant)" }}>
                 No agent activity yet.
               </div>
@@ -668,26 +661,28 @@ export default function AdkPipelineView({
                   style={{
                     padding: 14,
                     borderRadius: 12,
-                    background: statusSurface(latestAgentEvent.status),
-                    border: `1px solid ${statusColor(latestAgentEvent.status)}22`,
+                    background:
+                      activity.status === "error"
+                        ? statusSurface("error")
+                        : activity.status === "warning"
+                          ? statusSurface("warning")
+                          : statusSurface("running"),
+                    border: `1px solid ${
+                      activity.status === "error"
+                        ? statusColor("error")
+                        : activity.status === "warning"
+                          ? statusColor("warning")
+                          : statusColor("running")
+                    }22`,
                   }}
                 >
                   <div style={{ fontSize: 12, fontWeight: 700, color: "var(--md-on-surface)" }}>
-                    {latestAgentEvent.label || PHASE_LABELS[latestAgentEvent.phase]}
+                    {activity.title}
                   </div>
                   <div style={{ marginTop: 6, fontSize: 12, color: "var(--md-on-surface-variant)" }}>
-                    {PHASE_LABELS[latestAgentEvent.phase]} · {latestAgentEvent.kind} ·{" "}
-                    {formatTimestamp(latestAgentEvent.created_at)}
+                    {activity.phase_label} · {formatTimestamp(activity.updated_at)}
                   </div>
-                  {(latestAgentEvent.text_preview ||
-                    readString(
-                      isRecord(latestAgentEvent.payload_json) ? latestAgentEvent.payload_json : null,
-                      "detail"
-                    ) ||
-                    readString(
-                      isRecord(latestAgentEvent.payload_json) ? latestAgentEvent.payload_json : null,
-                      "error_message"
-                    )) && (
+                  {(activity.subject || activity.progress_text || activity.warning_message || activity.error_message) && (
                     <div
                       style={{
                         marginTop: 10,
@@ -698,20 +693,14 @@ export default function AdkPipelineView({
                         wordBreak: "break-word",
                       }}
                     >
-                      {latestAgentEvent.text_preview ||
-                        readString(
-                          isRecord(latestAgentEvent.payload_json) ? latestAgentEvent.payload_json : null,
-                          "detail"
-                        ) ||
-                        readString(
-                          isRecord(latestAgentEvent.payload_json) ? latestAgentEvent.payload_json : null,
-                          "error_message"
-                        )}
+                      {[activity.subject, activity.progress_text, activity.warning_message, activity.error_message]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </div>
                   )}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {recentAgentEvents.map((event) => (
+                  {activity.recent_events.map((event) => (
                     <button
                       key={event.id}
                       type="button"

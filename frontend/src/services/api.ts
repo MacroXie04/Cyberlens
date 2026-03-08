@@ -8,6 +8,7 @@ import type {
   GitHubUser,
   GitHubRepo,
   GitHubScan,
+  GitHubScanHistoryItem,
   AiReport,
   CodeFinding,
   AdkTraceSnapshot,
@@ -19,6 +20,9 @@ import type {
   GcpSecurityIncident,
   GcpServiceHealth,
   GcpGeoThreatPoint,
+  GcpHistoryStatus,
+  GcpReplaySnapshot,
+  GcpTimelineResponse,
 } from "../types";
 
 const LOCAL_BASE = "/api";
@@ -163,11 +167,16 @@ export const disconnectGitHub = () =>
 export const getRepos = () =>
   fetchJson<GitHubRepo[]>(`${LOCAL_BASE}/github/repos/`);
 
-export const triggerScan = (repo: string) =>
+export const triggerScan = (repo: string, scanMode: "fast" | "full" = "fast") =>
   fetchJson<GitHubScan>(`${LOCAL_BASE}/github/scan/`, {
     method: "POST",
-    body: JSON.stringify({ repo }),
+    body: JSON.stringify({ repo, scan_mode: scanMode }),
   });
+
+export const getScanHistory = (repo: string) =>
+  fetchJson<GitHubScanHistoryItem[]>(
+    `${LOCAL_BASE}/github/scans/?repo=${encodeURIComponent(repo)}`
+  );
 
 export const getScanResults = (id: number) =>
   fetchJson<GitHubScan>(`${LOCAL_BASE}/github/scan/${id}/`);
@@ -223,8 +232,20 @@ export const getGcpEstateSummary = (minutes?: number) => {
   return fetchJson<GcpEstateSummary>(`${LOCAL_BASE}/gcp-estate/summary/${qs}`);
 };
 
-export const getGcpEstateServices = () =>
-  fetchJson<GcpObservedService[]>(`${LOCAL_BASE}/gcp-estate/services/`);
+export const getGcpEstateServices = (params?: {
+  cursor?: string;
+  service?: string;
+  region?: string;
+}) => {
+  const searchParams = new URLSearchParams();
+  if (params?.cursor) searchParams.set("cursor", params.cursor);
+  if (params?.service) searchParams.set("service", params.service);
+  if (params?.region) searchParams.set("region", params.region);
+  const qs = searchParams.toString();
+  return fetchJson<GcpObservedService[]>(
+    `${LOCAL_BASE}/gcp-estate/services/${qs ? `?${qs}` : ""}`
+  );
+};
 
 export const getGcpEstateTimeseries = (params?: {
   minutes?: number;
@@ -287,6 +308,50 @@ export const getGcpSecurityMap = (minutes?: number) => {
   );
 };
 
+export const getGcpEstateTimeline = (params: {
+  start: string;
+  end: string;
+  bucket: string;
+  service?: string;
+  region?: string;
+}) => {
+  const searchParams = new URLSearchParams({
+    start: params.start,
+    end: params.end,
+    bucket: params.bucket,
+  });
+  if (params.service) searchParams.set("service", params.service);
+  if (params.region) searchParams.set("region", params.region);
+  return fetchJson<GcpTimelineResponse>(
+    `${LOCAL_BASE}/gcp-estate/timeline/?${searchParams.toString()}`
+  );
+};
+
+export const getGcpEstateReplaySnapshot = (params: {
+  cursor: string;
+  window_minutes: number;
+  start?: string;
+  end?: string;
+  service?: string;
+  region?: string;
+  source?: string;
+  severity?: string;
+}) => {
+  const searchParams = new URLSearchParams({
+    cursor: params.cursor,
+    window_minutes: String(params.window_minutes),
+  });
+  if (params.start) searchParams.set("start", params.start);
+  if (params.end) searchParams.set("end", params.end);
+  if (params.service) searchParams.set("service", params.service);
+  if (params.region) searchParams.set("region", params.region);
+  if (params.source) searchParams.set("source", params.source);
+  if (params.severity) searchParams.set("severity", params.severity);
+  return fetchJson<GcpReplaySnapshot>(
+    `${LOCAL_BASE}/gcp-estate/replay-snapshot/?${searchParams.toString()}`
+  );
+};
+
 export const triggerGcpRefresh = () =>
   fetchJson<{ status: string }>(`${LOCAL_BASE}/gcp-estate/refresh/`, {
     method: "POST",
@@ -296,6 +361,15 @@ export const ensureGcpCollection = () =>
   fetchJson<{ triggered: boolean }>(`${LOCAL_BASE}/gcp-estate/ensure-collection/`, {
     method: "POST",
   });
+
+export const ensureGcpHistory = (days = 30) =>
+  fetchJson<{ triggered: boolean; history_status: GcpHistoryStatus }>(
+    `${LOCAL_BASE}/gcp-estate/ensure-history/`,
+    {
+      method: "POST",
+      body: JSON.stringify({ days }),
+    }
+  );
 
 // Cloud Run Logs (always local — backend fetches from GCP)
 export const getCloudRunLogs = (params?: {

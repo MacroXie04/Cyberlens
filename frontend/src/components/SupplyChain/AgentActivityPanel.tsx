@@ -1,13 +1,10 @@
-import { useState } from "react";
-import type { AdkTracePhase, AdkTracePhaseSummary, AdkTraceSnapshot } from "../../types";
+import { useMemo, useState } from "react";
+
+import type { AdkTracePhase, AdkTracePhaseSummary, AdkTraceSnapshot, DerivedAgentActivity } from "../../types";
 
 interface Props {
   adkTrace: AdkTraceSnapshot;
-  tokens: { input: number; output: number; total: number };
-  filesScanned: number;
-  totalFiles: number;
-  currentActivity: string;
-  warningMessage?: string;
+  activity: DerivedAgentActivity;
 }
 
 const PHASE_ORDER: AdkTracePhase[] = [
@@ -32,17 +29,6 @@ const PHASE_SHORT_LABELS: Record<AdkTracePhase, string> = {
   repo_synthesis: "Synthesis",
 };
 
-const PHASE_COLORS: Record<AdkTracePhase, string> = {
-  dependency_input: "#5c6bc0",
-  dependency_adk_report: "#7e57c2",
-  code_inventory: "#26a69a",
-  chunk_summary: "#42a5f5",
-  candidate_generation: "#ffa726",
-  evidence_expansion: "#ab47bc",
-  verification: "#66bb6a",
-  repo_synthesis: "#ef5350",
-};
-
 function phaseStatusColor(status: AdkTracePhaseSummary["status"]): string {
   switch (status) {
     case "success":
@@ -58,44 +44,44 @@ function phaseStatusColor(status: AdkTracePhaseSummary["status"]): string {
   }
 }
 
-export default function AgentActivityPanel({
-  adkTrace,
-  tokens,
-  filesScanned,
-  totalFiles,
-  currentActivity,
-  warningMessage,
-}: Props) {
-  const [breakdownOpen, setBreakdownOpen] = useState(false);
+function formatTimestamp(value?: string | null): string {
+  if (!value) return "No updates yet";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
 
-  const phaseMap = new Map<AdkTracePhase, AdkTracePhaseSummary>();
-  for (const p of adkTrace.phases) {
-    phaseMap.set(p.phase, p);
-  }
+function eventSummary(eventText: string, fallback: string): string {
+  const summary = eventText.trim() || fallback;
+  return summary.length > 140 ? `${summary.slice(0, 137)}...` : summary;
+}
 
-  const currentPhase = [...PHASE_ORDER].reverse().find((phase) => {
-    const summary = phaseMap.get(phase);
-    return summary && (summary.status === "running" || summary.status === "success" || summary.status === "warning" || summary.status === "error");
-  });
+export default function AgentActivityPanel({ adkTrace, activity }: Props) {
+  const [eventsOpen, setEventsOpen] = useState(false);
 
-  const totalPhaseTokens = adkTrace.phases.reduce((s, p) => s + p.total_tokens, 0);
+  const phaseMap = useMemo(() => {
+    const map = new Map<AdkTracePhase, AdkTracePhaseSummary>();
+    for (const phase of adkTrace.phases) {
+      map.set(phase.phase, phase);
+    }
+    return map;
+  }, [adkTrace.phases]);
 
   return (
     <div
       className="card"
       style={{
-        padding: "16px 20px",
+        padding: "18px 20px",
         display: "flex",
         flexDirection: "column",
-        gap: 14,
+        gap: 16,
       }}
     >
-      {/* Pipeline Phase Strip */}
       <div style={{ display: "flex", gap: 4 }}>
         {PHASE_ORDER.map((phase) => {
           const summary = phaseMap.get(phase);
           const status = summary?.status || "pending";
-          const isCurrent = phase === currentPhase && status === "running";
+          const isCurrent = phase === activity.phase && status === "running";
           const barColor = phaseStatusColor(status);
 
           return (
@@ -103,7 +89,7 @@ export default function AgentActivityPanel({
               <div
                 style={{
                   height: 4,
-                  borderRadius: 2,
+                  borderRadius: 999,
                   background: barColor,
                   position: "relative",
                   overflow: "hidden",
@@ -124,14 +110,9 @@ export default function AgentActivityPanel({
               <div
                 style={{
                   fontSize: 9,
-                  marginTop: 4,
-                  color:
-                    isCurrent
-                      ? "var(--md-primary)"
-                      : status === "success"
-                        ? "var(--md-on-surface)"
-                        : "var(--md-on-surface-variant)",
-                  fontWeight: isCurrent ? 700 : 400,
+                  marginTop: 5,
+                  color: isCurrent ? "var(--md-primary)" : "var(--md-on-surface-variant)",
+                  fontWeight: isCurrent ? 700 : 500,
                   whiteSpace: "nowrap",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
@@ -139,211 +120,202 @@ export default function AgentActivityPanel({
               >
                 {PHASE_SHORT_LABELS[phase]}
               </div>
-              <div
-                style={{
-                  fontSize: 8,
-                  fontFamily: "var(--md-font-mono)",
-                  color: "var(--md-on-surface-variant)",
-                  marginTop: 1,
-                }}
-              >
-                {(summary?.total_tokens || 0) > 0
-                  ? `${(summary!.total_tokens / 1000).toFixed(1)}k`
-                  : "\u2014"}
-              </div>
             </div>
           );
         })}
       </div>
 
-      {/* Agent Activity Row */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <div
-          style={{
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: 0.6,
-            textTransform: "uppercase",
-            color: "var(--md-primary)",
-            flexShrink: 0,
-          }}
-        >
-          Agent Activity
-        </div>
-        {currentPhase && (
-          <span
-            style={{
-              fontSize: 10,
-              padding: "2px 8px",
-              borderRadius: 10,
-              fontWeight: 600,
-              background: `${PHASE_COLORS[currentPhase]}22`,
-              color: PHASE_COLORS[currentPhase],
-              flexShrink: 0,
-            }}
-          >
-            {PHASE_SHORT_LABELS[currentPhase]}
-          </span>
-        )}
-        <div
-          style={{
-            fontSize: 13,
-            color: "var(--md-on-surface)",
-            lineHeight: 1.5,
-            flex: 1,
-            minWidth: 0,
-          }}
-        >
-          {currentActivity}
-        </div>
-      </div>
-      {warningMessage && (
-        <div style={{ fontSize: 12, color: "var(--md-warning)", lineHeight: 1.5, marginTop: -8 }}>
-          {warningMessage}
-        </div>
-      )}
-
-      {/* Live Token Usage Row */}
       <div
         style={{
-          display: "flex",
-          flexWrap: "wrap",
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1.2fr) minmax(240px, 0.8fr)",
           gap: 16,
-          fontSize: 12,
-          color: "var(--md-on-surface-variant)",
-          padding: "10px 12px",
-          background: "var(--md-surface-container-high)",
-          borderRadius: 8,
         }}
+        className="agent-activity-panel-grid"
       >
-        <span style={{ fontWeight: 500, color: "var(--md-on-surface)" }}>Live token usage</span>
-        <span>
-          <strong style={{ color: "var(--md-on-surface)" }}>
-            {tokens.input.toLocaleString()}
-          </strong>{" "}
-          input
-        </span>
-        <span>
-          <strong style={{ color: "var(--md-on-surface)" }}>
-            {tokens.output.toLocaleString()}
-          </strong>{" "}
-          output
-        </span>
-        <span>
-          <strong style={{ color: "var(--md-on-surface)" }}>
-            {tokens.total.toLocaleString()}
-          </strong>{" "}
-          total
-        </span>
-        {totalFiles > 0 && (
-          <span>
-            <strong style={{ color: "var(--md-on-surface)" }}>{filesScanned}</strong>/
-            {totalFiles} files
-          </span>
-        )}
-      </div>
+        <div
+          style={{
+            padding: 16,
+            borderRadius: 16,
+            background:
+              activity.status === "error"
+                ? "rgba(198, 40, 40, 0.08)"
+                : activity.status === "warning"
+                  ? "rgba(245, 124, 0, 0.08)"
+                  : "var(--md-surface-container)",
+            border:
+              activity.status === "error"
+                ? "1px solid rgba(198, 40, 40, 0.2)"
+                : activity.status === "warning"
+                  ? "1px solid rgba(245, 124, 0, 0.2)"
+                  : "1px solid var(--md-outline-variant)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: 0.8,
+                textTransform: "uppercase",
+                color: "var(--md-primary)",
+              }}
+            >
+              Agent Activity
+            </div>
+            <span
+              style={{
+                fontSize: 11,
+                padding: "4px 10px",
+                borderRadius: 999,
+                background: "var(--md-surface-container-high)",
+                color: "var(--md-on-surface)",
+                fontWeight: 600,
+              }}
+            >
+              {activity.phase_label}
+            </span>
+          </div>
 
-      {/* Collapsible Per-Phase Token Breakdown */}
-      {totalPhaseTokens > 0 && (
-        <div>
-          <button
-            onClick={() => setBreakdownOpen(!breakdownOpen)}
+          <div style={{ marginTop: 14, fontSize: 18, fontWeight: 700, color: "var(--md-on-surface)" }}>
+            {activity.title}
+          </div>
+          {activity.subject && (
+            <div style={{ marginTop: 6, fontSize: 13, color: "var(--md-on-surface)" }}>
+              {activity.subject}
+            </div>
+          )}
+          <div
             style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              fontSize: 12,
-              fontWeight: 500,
+              marginTop: 10,
+              fontSize: 13,
               color: "var(--md-on-surface-variant)",
-              padding: "4px 0",
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
+              lineHeight: 1.6,
             }}
           >
-            <span style={{ fontSize: 10 }}>{breakdownOpen ? "\u25BC" : "\u25B6"}</span>
-            Token breakdown by phase
+            {activity.progress_text}
+          </div>
+          {(activity.warning_message || activity.error_message) && (
+            <div
+              style={{
+                marginTop: 12,
+                padding: "10px 12px",
+                borderRadius: 10,
+                background:
+                  activity.error_message
+                    ? "rgba(198, 40, 40, 0.08)"
+                    : "rgba(245, 124, 0, 0.08)",
+                color: activity.error_message ? "var(--md-error)" : "var(--md-warning)",
+                fontSize: 12,
+                lineHeight: 1.6,
+              }}
+            >
+              {activity.error_message || activity.warning_message}
+            </div>
+          )}
+        </div>
+
+        <div
+          style={{
+            padding: 16,
+            borderRadius: 16,
+            background: "var(--md-surface-container)",
+            border: "1px solid var(--md-outline-variant)",
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+          }}
+        >
+          <div style={{ fontSize: 11, color: "var(--md-on-surface-variant)", textTransform: "uppercase", letterSpacing: 0.8, fontWeight: 700 }}>
+            Execution Status
+          </div>
+          <ActivityMeta label="Current phase" value={activity.phase_label} />
+          <ActivityMeta label="Last update" value={formatTimestamp(activity.updated_at)} />
+          <ActivityMeta
+            label="Event count"
+            value={adkTrace.events.length > 0 ? adkTrace.events.length.toLocaleString() : "0"}
+          />
+        </div>
+      </div>
+
+      {activity.recent_events.length > 0 && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setEventsOpen((open) => !open)}
+            style={{
+              border: "none",
+              background: "transparent",
+              padding: 0,
+              fontSize: 12,
+              fontWeight: 600,
+              color: "var(--md-on-surface-variant)",
+              cursor: "pointer",
+            }}
+          >
+            {eventsOpen ? "Hide recent events" : "Show recent events"}
           </button>
-          {breakdownOpen && (
-            <div style={{ marginTop: 8 }}>
-              {/* Stacked bar */}
-              <div
-                style={{
-                  display: "flex",
-                  height: 8,
-                  borderRadius: 4,
-                  overflow: "hidden",
-                  marginBottom: 10,
-                }}
-              >
-                {PHASE_ORDER.map((phase) => {
-                  const summary = phaseMap.get(phase);
-                  const tok = summary?.total_tokens || 0;
-                  if (tok === 0) return null;
-                  const pct = (tok / totalPhaseTokens) * 100;
-                  return (
-                    <div
-                      key={phase}
-                      style={{
-                        width: `${pct}%`,
-                        background: PHASE_COLORS[phase],
-                        minWidth: 2,
-                      }}
-                    />
-                  );
-                })}
-              </div>
-              {/* Legend */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {PHASE_ORDER.map((phase) => {
-                  const summary = phaseMap.get(phase);
-                  const tok = summary?.total_tokens || 0;
-                  if (tok === 0) return null;
-                  const pct = ((tok / totalPhaseTokens) * 100).toFixed(1);
-                  return (
-                    <div
-                      key={phase}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        fontSize: 11,
-                        color: "var(--md-on-surface-variant)",
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: 10,
-                          height: 10,
-                          borderRadius: 2,
-                          background: PHASE_COLORS[phase],
-                          flexShrink: 0,
-                        }}
-                      />
-                      <span style={{ flex: 1, color: "var(--md-on-surface)" }}>
-                        {PHASE_SHORT_LABELS[phase]}
-                      </span>
-                      <span style={{ fontFamily: "var(--md-font-mono)" }}>
-                        {tok.toLocaleString()}
-                      </span>
-                      <span style={{ fontFamily: "var(--md-font-mono)", width: 45, textAlign: "right" }}>
-                        {pct}%
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+
+          {eventsOpen && (
+            <div
+              style={{
+                marginTop: 10,
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: 10,
+              }}
+            >
+              {activity.recent_events.map((event) => (
+                <div
+                  key={event.id}
+                  style={{
+                    padding: "12px 14px",
+                    borderRadius: 12,
+                    background: "var(--md-surface-container)",
+                    border: "1px solid var(--md-outline-variant)",
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "var(--md-on-surface)" }}>
+                    {event.label || event.kind}
+                  </div>
+                  <div style={{ marginTop: 4, fontSize: 11, color: "var(--md-on-surface-variant)" }}>
+                    {PHASE_SHORT_LABELS[event.phase]} · #{event.sequence}
+                  </div>
+                  <div
+                    style={{
+                      marginTop: 8,
+                      fontSize: 12,
+                      color: "var(--md-on-surface-variant)",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {eventSummary(event.text_preview, event.kind)}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
       )}
 
       <style>{`
-        @keyframes shimmer {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(100%); }
+        @media (max-width: 880px) {
+          .agent-activity-panel-grid {
+            grid-template-columns: 1fr !important;
+          }
         }
       `}</style>
+    </div>
+  );
+}
+
+function ActivityMeta({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: "var(--md-on-surface-variant)" }}>{label}</div>
+      <div style={{ marginTop: 4, fontSize: 13, fontWeight: 600, color: "var(--md-on-surface)" }}>
+        {value}
+      </div>
     </div>
   );
 }

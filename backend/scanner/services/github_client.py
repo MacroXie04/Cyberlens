@@ -22,6 +22,11 @@ SOURCE_EXTENSIONS = {
     ".java",
     ".php",
     ".html",
+    ".json",
+    ".sql",
+    ".yml",
+    ".yaml",
+    ".toml",
     ".swift",
     ".m",
     ".mm",
@@ -31,6 +36,20 @@ SOURCE_EXTENSIONS = {
     ".cpp",
     ".kt",
     ".kts",
+}
+SOURCE_FILENAMES = {
+    "package.json",
+    "package-lock.json",
+    "requirements.txt",
+    "Pipfile",
+    "pyproject.toml",
+    "go.mod",
+    "pom.xml",
+    "Gemfile",
+    "Dockerfile",
+    "docker-compose.yml",
+    "docker-compose.yaml",
+    "tsconfig.json",
 }
 SKIP_PATHS = {"node_modules/", "__pycache__/", ".git/", "dist/", "venv/", ".venv/", "build/", "vendor/"}
 MAX_FILE_SIZE = 50 * 1024  # 50KB
@@ -143,7 +162,14 @@ def _should_skip_path(path: str) -> bool:
     return any(skip in path for skip in SKIP_PATHS)
 
 
-def _fetch_repo_files(pat: str, owner: str, repo: str, paths: list[str]) -> dict[str, str]:
+def _fetch_repo_files(
+    pat: str,
+    owner: str,
+    repo: str,
+    paths: list[str],
+    *,
+    max_workers: int | None = None,
+) -> dict[str, str]:
     found = {}
     if not paths:
         return found
@@ -151,7 +177,8 @@ def _fetch_repo_files(pat: str, owner: str, repo: str, paths: list[str]) -> dict
         content = get_file_content(pat, owner, repo, paths[0])
         return {paths[0]: content} if content is not None else {}
 
-    with ThreadPoolExecutor(max_workers=min(MAX_FETCH_WORKERS, len(paths))) as executor:
+    worker_count = max_workers if max_workers is not None else MAX_FETCH_WORKERS
+    with ThreadPoolExecutor(max_workers=min(max(1, worker_count), len(paths))) as executor:
         future_map = {
             executor.submit(get_file_content, pat, owner, repo, path): path
             for path in paths
@@ -188,7 +215,17 @@ def get_dependency_files(pat: str, repo_full_name: str) -> dict[str, str]:
     return _fetch_repo_files(pat, owner, repo, manifest_paths)
 
 
-def get_source_files(pat: str, repo_full_name: str) -> dict[str, str]:
+def _is_source_candidate(path: str) -> bool:
+    base = path.rsplit("/", 1)[-1]
+    return any(path.endswith(ext) for ext in SOURCE_EXTENSIONS) or base in SOURCE_FILENAMES or base.startswith(".env")
+
+
+def get_source_files(
+    pat: str,
+    repo_full_name: str,
+    *,
+    max_workers: int | None = None,
+) -> dict[str, str]:
     """Fetch source code files from a GitHub repo for security analysis."""
     owner, repo = repo_full_name.split("/", 1)
     tree = _get_repo_tree(pat, repo_full_name)
@@ -201,7 +238,7 @@ def get_source_files(pat: str, repo_full_name: str) -> dict[str, str]:
             continue
         path = item.get("path", "")
         # Skip non-source files
-        if not any(path.endswith(ext) for ext in SOURCE_EXTENSIONS):
+        if not _is_source_candidate(path):
             continue
         # Skip blacklisted directories
         if _should_skip_path(path):
@@ -212,4 +249,4 @@ def get_source_files(pat: str, repo_full_name: str) -> dict[str, str]:
             continue
         source_paths.append(path)
 
-    return _fetch_repo_files(pat, owner, repo, source_paths)
+    return _fetch_repo_files(pat, owner, repo, source_paths, max_workers=max_workers)

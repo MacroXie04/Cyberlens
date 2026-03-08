@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import * as d3 from "d3";
+
 import type { GcpGeoThreatPoint } from "../../types";
 import { socColors } from "../../theme/theme";
 
@@ -14,171 +15,178 @@ export default function GeoAttackMap({ data }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
-    if (!svgRef.current) return;
+    let cancelled = false;
 
-    const svg = d3.select(svgRef.current);
-    const width = svgRef.current.clientWidth || 600;
-    const height = 260;
+    async function renderMap() {
+      if (!svgRef.current) return;
 
-    svg.attr("viewBox", `0 0 ${width} ${height}`);
-    svg.selectAll("*").remove();
+      const svg = d3.select(svgRef.current);
+      const width = svgRef.current.clientWidth || 560;
+      const height = 320;
 
-    const projection = d3
-      .geoNaturalEarth1()
-      .scale(width / 5.5)
-      .translate([width / 2, height / 2]);
+      svg.attr("viewBox", `0 0 ${width} ${height}`);
+      svg.selectAll("*").remove();
 
-    const pathGen = d3.geoPath(projection);
+      svg
+        .append("rect")
+        .attr("width", width)
+        .attr("height", height)
+        .attr("fill", socColors.bgCard);
 
-    // Background
-    svg
-      .append("rect")
-      .attr("width", width)
-      .attr("height", height)
-      .attr("fill", socColors.bgCard);
+      const projection = d3
+        .geoNaturalEarth1()
+        .scale(width / 5.7)
+        .translate([width / 2, height / 2]);
 
-    // Graticule
-    const grat = d3.geoGraticule10();
-    svg
-      .append("path")
-      .datum(grat)
-      .attr("d", pathGen as never)
-      .attr("fill", "none")
-      .attr("stroke", socColors.border)
-      .attr("stroke-width", 0.3);
+      const pathGen = d3.geoPath(projection);
 
-    // Load world topology
-    d3.json(TOPOLOGY_URL).then((topoData: any) => {
-      if (!topoData) return;
-      // Dynamic import from CDN to avoid bundling topojson-client
-      import(
+      svg
+        .append("path")
+        .datum(d3.geoGraticule10())
+        .attr("d", pathGen as never)
+        .attr("fill", "none")
+        .attr("stroke", socColors.border)
+        .attr("stroke-width", 0.6);
+
+      const topoData = await d3.json(TOPOLOGY_URL);
+      if (!topoData || cancelled) return;
+
+      const topojson = await import(
         /* @vite-ignore */ "https://cdn.jsdelivr.net/npm/topojson-client@3/+esm"
-      ).then((topojson: any) => {
-      let countries;
-      try {
-        countries = topojson.feature(topoData, topoData.objects.countries);
-      } catch {
-        return;
-      }
+      );
+      if (cancelled) return;
 
-      // Draw countries
+      const countries = topojson.feature(topoData as never, (topoData as any).objects.countries);
       svg
         .append("g")
         .selectAll("path")
         .data((countries as any).features)
         .join("path")
         .attr("d", pathGen as never)
-        .attr("fill", "#e2e8f0")
-        .attr("stroke", socColors.border)
-        .attr("stroke-width", 0.4);
+        .attr("fill", "#e8edf5")
+        .attr("stroke", "#cfd7e3")
+        .attr("stroke-width", 0.6);
 
-      // Attack points — only those with valid coords
       const validPoints = data.filter(
-        (p) => p.geo_lat != null && p.geo_lng != null
+        (point) => point.geo_lat != null && point.geo_lng != null
       );
+      const maxCount = d3.max(validPoints, (point) => point.count) || 1;
+      const radiusScale = d3.scaleSqrt().domain([0, maxCount]).range([4, 18]);
 
-      const maxCount = d3.max(validPoints, (d) => d.count) || 1;
-      const sizeScale = d3.scaleSqrt().domain([0, maxCount]).range([3, 18]);
-
-      // Pulse rings
-      const pulseG = svg.append("g");
-      validPoints.forEach((p) => {
-        const coords = projection([p.geo_lng!, p.geo_lat!]);
+      const bubbleGroup = svg.append("g");
+      validPoints.forEach((point) => {
+        const coords = projection([point.geo_lng!, point.geo_lat!]);
         if (!coords) return;
 
-        const isCritical = p.critical > 0;
-        const color = isCritical ? socColors.critical : socColors.high;
-
-        pulseG
+        const fill = point.critical > 0 ? socColors.critical : socColors.accent;
+        bubbleGroup
           .append("circle")
           .attr("cx", coords[0])
           .attr("cy", coords[1])
-          .attr("r", sizeScale(p.count) + 4)
-          .attr("fill", "none")
-          .attr("stroke", color)
-          .attr("stroke-width", 1)
-          .attr("opacity", 0.6)
-          .style("animation", "pulse-ring 2s ease-out infinite");
-      });
+          .attr("r", radiusScale(point.count) + 4)
+          .attr("fill", fill)
+          .attr("opacity", 0.12);
 
-      // Attack dots
-      const dotsG = svg.append("g");
-      validPoints.forEach((p) => {
-        const coords = projection([p.geo_lng!, p.geo_lat!]);
-        if (!coords) return;
-
-        const isCritical = p.critical > 0;
-        const color = isCritical ? socColors.critical : socColors.high;
-
-        dotsG
+        bubbleGroup
           .append("circle")
           .attr("cx", coords[0])
           .attr("cy", coords[1])
-          .attr("r", sizeScale(p.count))
-          .attr("fill", color)
-          .attr("fill-opacity", 0.6)
-          .attr("stroke", color)
-          .attr("stroke-width", 1);
+          .attr("r", radiusScale(point.count))
+          .attr("fill", fill)
+          .attr("opacity", 0.82)
+          .attr("stroke", "#fff")
+          .attr("stroke-width", 1.5);
+      });
+    }
 
-        // Label for large clusters
-        if (p.count >= 3 && p.country) {
-          dotsG
-            .append("text")
-            .attr("x", coords[0])
-            .attr("y", coords[1] - sizeScale(p.count) - 4)
-            .attr("text-anchor", "middle")
-            .attr("fill", socColors.text)
-            .attr("font-size", 9)
-            .text(`${p.country} (${p.count})`);
-        }
-      });
-      });
+    renderMap().catch((error) => {
+      if (!cancelled) {
+        console.error("Failed to render geo map", error);
+      }
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, [data]);
+
+  const hotSources = data.reduce((sum, point) => sum + point.count, 0);
 
   return (
     <div
       style={{
         background: socColors.bgCard,
         border: `1px solid ${socColors.border}`,
-        borderRadius: 8,
+        borderRadius: 32,
         overflow: "hidden",
+        boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
       }}
     >
       <div
         style={{
-          padding: "10px 16px",
+          padding: "18px 20px 14px",
           borderBottom: `1px solid ${socColors.border}`,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
+          gap: 10,
+          flexWrap: "wrap",
         }}
       >
-        <span
+        <div>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              color: socColors.textMuted,
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+            }}
+          >
+            Geo Attack Map
+          </div>
+          <div style={{ marginTop: 6, fontSize: 13, color: socColors.textDim }}>
+            Global origin points observed in the replay window
+          </div>
+        </div>
+        <div
           style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "10px 14px",
+            borderRadius: 999,
+            background: socColors.bgPanel,
             fontSize: 12,
             color: socColors.textDim,
-            fontWeight: 600,
-            textTransform: "uppercase",
-            letterSpacing: "0.5px",
           }}
         >
-          Geo Attack Map
-        </span>
-        <span style={{ fontSize: 11, color: socColors.textDim }}>
-          {data.length} sources
-        </span>
+          <span style={{ color: socColors.text }}>Sources {data.length}</span>
+          <span style={{ color: socColors.textDim }}>Events {hotSources}</span>
+        </div>
       </div>
-      <svg
-        ref={svgRef}
-        style={{ width: "100%", height: 260, display: "block" }}
-      />
-      <style>{`
-        @keyframes pulse-ring {
-          0% { transform-origin: center; opacity: 0.6; }
-          100% { transform-origin: center; opacity: 0; r: 24px; }
-        }
-      `}</style>
+
+      {data.length === 0 ? (
+        <div
+          style={{
+            minHeight: 320,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: socColors.textDim,
+            fontSize: 14,
+            background:
+              "radial-gradient(circle at 20% 20%, rgba(232,240,254,0.8) 0, rgba(255,255,255,0) 42%)",
+          }}
+        >
+          No geo-correlated events in the selected window
+        </div>
+      ) : (
+        <svg
+          ref={svgRef}
+          style={{ width: "100%", height: 320, display: "block" }}
+        />
+      )}
     </div>
   );
 }

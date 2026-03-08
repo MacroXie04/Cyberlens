@@ -1,8 +1,11 @@
-import type { GcpSecurityEvent, GcpEventSource } from "../../types";
-import { socColors } from "../../theme/theme";
+import type { GcpEventSource, GcpSecurityEvent, LiveMonitorMode } from "../../types";
+import { socColors, typography } from "../../theme/theme";
 
 interface Props {
   events: GcpSecurityEvent[];
+  counts?: Record<string, number>;
+  mode: LiveMonitorMode;
+  replayWindowLabel: string;
 }
 
 const LANES: { source: GcpEventSource; label: string; color: string }[] = [
@@ -12,167 +15,160 @@ const LANES: { source: GcpEventSource; label: string; color: string }[] = [
   { source: "iap", label: "IAP", color: socColors.medium },
 ];
 
-const severityDot: Record<string, string> = {
-  critical: socColors.critical,
-  high: socColors.high,
-  medium: socColors.medium,
-  low: socColors.low,
-  info: socColors.info,
-};
-
 function formatTime(ts: string): string {
   try {
     return new Date(ts).toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
-      second: "2-digit",
     });
   } catch {
     return ts;
   }
 }
 
-export default function PerimeterLanes({ events }: Props) {
-  const bySource = new Map<GcpEventSource, GcpSecurityEvent[]>();
-  for (const lane of LANES) {
-    bySource.set(lane.source, []);
-  }
-  for (const evt of events) {
-    const list = bySource.get(evt.source as GcpEventSource);
-    if (list) list.push(evt);
-  }
-
+export default function PerimeterLanes({
+  events,
+  counts,
+  mode,
+  replayWindowLabel,
+}: Props) {
   return (
     <div
       style={{
         background: socColors.bgCard,
         border: `1px solid ${socColors.border}`,
-        borderRadius: 8,
+        borderRadius: 32,
         overflow: "hidden",
+        boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
       }}
     >
       <div
         style={{
-          padding: "10px 16px",
+          padding: "18px 20px 14px",
           borderBottom: `1px solid ${socColors.border}`,
-          fontSize: 12,
-          color: socColors.textDim,
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: "0.5px",
         }}
       >
-        Perimeter Lanes
+        <div
+          style={{
+            fontSize: 12,
+            fontWeight: 700,
+            color: socColors.textMuted,
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+          }}
+        >
+          Perimeter Lanes
+        </div>
+        <div style={{ marginTop: 6, fontSize: 13, color: socColors.textDim }}>
+          {mode === "live"
+            ? "North-south telemetry grouped by enforcement layer"
+            : `Edge and identity telemetry in ${replayWindowLabel}`}
+        </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)" }}>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: 0,
+        }}
+      >
         {LANES.map((lane) => {
-          const laneEvents = bySource.get(lane.source) || [];
+          const laneEvents = events.filter((event) => event.source === lane.source).slice(0, 4);
+          const count = counts?.[lane.source] ?? laneEvents.length;
           return (
             <div
               key={lane.source}
               style={{
+                padding: 18,
                 borderRight: `1px solid ${socColors.border}`,
-                minHeight: 160,
+                borderBottom: `1px solid ${socColors.border}`,
+                minHeight: 184,
               }}
             >
-              {/* Lane header */}
               <div
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  gap: 6,
-                  padding: "8px 12px",
-                  borderBottom: `1px solid ${socColors.border}`,
+                  justifyContent: "space-between",
+                  gap: 8,
                 }}
               >
-                <div
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: "50%",
-                    background: lane.color,
-                  }}
-                />
-                <span style={{ fontSize: 11, color: socColors.text, fontWeight: 500 }}>
-                  {lane.label}
-                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: "50%",
+                      background: lane.color,
+                    }}
+                  />
+                  <span style={{ fontSize: 14, fontWeight: 700, color: socColors.text }}>
+                    {lane.label}
+                  </span>
+                </div>
                 <span
                   style={{
-                    marginLeft: "auto",
-                    fontSize: 11,
-                    color: laneEvents.length > 0 ? lane.color : socColors.textDim,
-                    fontVariantNumeric: "tabular-nums",
+                    padding: "6px 10px",
+                    borderRadius: 999,
+                    background: socColors.bgPanel,
+                    color: lane.color,
+                    fontSize: 12,
+                    fontWeight: 700,
                   }}
                 >
-                  {laneEvents.length}
+                  {count}
                 </span>
               </div>
 
-              {/* Lane events */}
-              <div
-                style={{
-                  maxHeight: 140,
-                  overflowY: "auto",
-                  padding: "4px 0",
-                }}
-              >
+              <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10 }}>
                 {laneEvents.length === 0 ? (
                   <div
                     style={{
-                      padding: "12px",
-                      fontSize: 11,
+                      padding: "18px 12px",
+                      borderRadius: 18,
+                      background: socColors.bgPanel,
                       color: socColors.textDim,
+                      fontSize: 13,
                       textAlign: "center",
                     }}
                   >
                     No events
                   </div>
                 ) : (
-                  laneEvents.slice(0, 20).map((evt) => (
+                  laneEvents.map((event) => (
                     <div
-                      key={evt.id}
+                      key={event.id}
                       style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        padding: "3px 12px",
-                        fontSize: 11,
+                        padding: "12px 12px 10px",
+                        borderRadius: 18,
+                        background: socColors.bgPanel,
                       }}
                     >
                       <div
                         style={{
-                          width: 5,
-                          height: 5,
-                          borderRadius: "50%",
-                          background: severityDot[evt.severity] || socColors.info,
-                          flexShrink: 0,
-                        }}
-                      />
-                      <span style={{ color: socColors.textDim, flexShrink: 0 }}>
-                        {formatTime(evt.timestamp)}
-                      </span>
-                      <span
-                        style={{
-                          color: socColors.text,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                          flex: 1,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 8,
                         }}
                       >
-                        {evt.category.replace(/_/g, " ")}
-                      </span>
-                      {evt.source_ip && (
+                        <span style={{ fontSize: 12, fontWeight: 700, color: socColors.text }}>
+                          {event.category.replace(/_/g, " ")}
+                        </span>
                         <span
                           style={{
+                            fontSize: 11,
                             color: socColors.textDim,
-                            fontFamily: "'Noto Sans Mono', monospace",
-                            fontSize: 10,
+                            fontFamily: typography.fontMono,
                           }}
                         >
-                          {evt.source_ip}
+                          {formatTime(event.timestamp)}
                         </span>
-                      )}
+                      </div>
+                      <div style={{ marginTop: 8, fontSize: 12, color: socColors.textDim }}>
+                        {event.source_ip || event.principal || event.path || "Structured perimeter event"}
+                      </div>
                     </div>
                   ))
                 )}

@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 import time
 
 from django.utils import timezone
@@ -12,6 +11,7 @@ from pydantic import BaseModel, Field
 from scanner.models import AiReport, GitHubScan
 
 from .adk_trace import clip_text_preview, record_phase_metric, record_trace_event
+from .adk_code_pipeline import _build_llm_model
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class SecurityReport(BaseModel):
     remediation: Remediation = Field(description="Categorized remediation actions")
 
 
-def _build_report_agent(model: str) -> Agent:
+def _build_report_agent(model) -> Agent:
     return Agent(
         name="security_reporter",
         model=model,
@@ -235,8 +235,6 @@ def generate_report(scan: GitHubScan, user_id: int | None = None):
         )
         return
 
-    os.environ["GOOGLE_API_KEY"] = api_key
-
     if not vuln_data:
         started_at = timezone.now()
         record_trace_event(
@@ -324,7 +322,7 @@ def generate_report(scan: GitHubScan, user_id: int | None = None):
     total_tokens = 0
 
     try:
-        agent = _build_report_agent(model_name)
+        agent = _build_report_agent(_build_llm_model(model_name, api_key))
         runner = InMemoryRunner(agent=agent, app_name="cyberlens_report")
         runner.auto_create_session = True
 

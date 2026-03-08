@@ -1,9 +1,11 @@
-import type { GcpObservedService } from "../../types";
-import { socColors } from "../../theme/theme";
+import type { GcpObservedService, LiveMonitorMode } from "../../types";
+import { socColors, typography } from "../../theme/theme";
 
 interface Props {
   services: GcpObservedService[];
   selectedService: string;
+  mode: LiveMonitorMode;
+  replayWindowLabel: string;
   onSelectService: (name: string) => void;
   emptyStateMessage?: string;
 }
@@ -22,181 +24,255 @@ function errorColor(rate: number): string {
   return socColors.safe;
 }
 
+function formatLatency(value: number, sampleMissing?: boolean): string {
+  if (sampleMissing) return "No sample";
+  return `${(value ?? 0).toFixed(0)}ms`;
+}
+
 export default function EstateMatrix({
   services,
   selectedService,
+  mode,
+  replayWindowLabel,
   onSelectService,
   emptyStateMessage,
 }: Props) {
-  if (services.length === 0) {
-    return (
-      <div
-        style={{
-          background: socColors.bgCard,
-          border: `1px solid ${socColors.border}`,
-          borderRadius: 8,
-          padding: 20,
-          color: socColors.textDim,
-          fontSize: 13,
-          textAlign: "center",
-        }}
-      >
-        {emptyStateMessage || "No Cloud Run services discovered. Configure GCP settings and refresh."}
-      </div>
-    );
-  }
-
   return (
     <div
       style={{
         background: socColors.bgCard,
         border: `1px solid ${socColors.border}`,
-        borderRadius: 8,
+        borderRadius: 30,
         overflow: "hidden",
+        boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
       }}
     >
-      <div
-        style={{
-          padding: "10px 16px",
-          borderBottom: `1px solid ${socColors.border}`,
-          fontSize: 12,
-          color: socColors.textDim,
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: "0.5px",
-        }}
-      >
-        Estate Matrix
-      </div>
-      <div style={{ overflowX: "auto" }}>
-        <table
+      <SectionHeader
+        title="Estate Matrix"
+        subtitle={
+          mode === "live"
+            ? "Latest Cloud Run service posture"
+            : `Closest health sample before replay cursor · ${replayWindowLabel}`
+        }
+      />
+
+      {services.length === 0 ? (
+        <div
           style={{
-            width: "100%",
-            borderCollapse: "collapse",
-            fontSize: 12,
+            padding: "28px 20px",
+            color: socColors.textDim,
+            fontSize: 14,
+            textAlign: "center",
+            lineHeight: 1.6,
           }}
         >
-          <thead>
-            <tr
-              style={{
-                borderBottom: `1px solid ${socColors.border}`,
-                color: socColors.textDim,
-                textAlign: "left",
-              }}
-            >
-              <th style={{ padding: "8px 12px", fontWeight: 500 }}>Service</th>
-              <th style={{ padding: "8px 12px", fontWeight: 500 }}>Region</th>
-              <th style={{ padding: "8px 12px", fontWeight: 500 }}>Revision</th>
-              <th style={{ padding: "8px 12px", fontWeight: 500 }}>Instances</th>
-              <th style={{ padding: "8px 12px", fontWeight: 500 }}>Req/s</th>
-              <th style={{ padding: "8px 12px", fontWeight: 500 }}>Err %</th>
-              <th style={{ padding: "8px 12px", fontWeight: 500 }}>p50</th>
-              <th style={{ padding: "8px 12px", fontWeight: 500 }}>p95</th>
-              <th style={{ padding: "8px 12px", fontWeight: 500 }}>Risk</th>
-              <th style={{ padding: "8px 12px", fontWeight: 500 }}>Tags</th>
-            </tr>
-          </thead>
-          <tbody>
-            {services.map((svc) => (
-              <tr
-                key={`${svc.service_name}-${svc.region}`}
-                onClick={() => onSelectService(svc.service_name)}
-                style={{
-                  borderBottom: `1px solid ${socColors.border}`,
-                  background:
-                    selectedService === svc.service_name
-                      ? socColors.bgCardHover
-                      : "transparent",
-                  cursor: "pointer",
-                  color: socColors.text,
-                  transition: "background 150ms",
-                }}
-                onMouseEnter={(e) => {
-                  if (selectedService !== svc.service_name) {
-                    e.currentTarget.style.background = socColors.bgCardHover;
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (selectedService !== svc.service_name) {
-                    e.currentTarget.style.background = "transparent";
-                  }
-                }}
-              >
-                <td style={{ padding: "8px 12px", fontWeight: 500 }}>
-                  {svc.service_name}
-                </td>
-                <td style={{ padding: "8px 12px", color: socColors.textMuted }}>
-                  {svc.region}
-                </td>
-                <td
-                  style={{
-                    padding: "8px 12px",
-                    fontFamily: "'Noto Sans Mono', monospace",
-                    fontSize: 11,
-                    color: socColors.textDim,
-                  }}
-                >
-                  {svc.latest_revision?.split("-").pop() || "—"}
-                </td>
-                <td style={{ padding: "8px 12px", fontVariantNumeric: "tabular-nums" }}>
-                  {svc.instance_count ?? 0}
-                </td>
-                <td style={{ padding: "8px 12px", fontVariantNumeric: "tabular-nums" }}>
-                  {(svc.request_rate ?? 0).toFixed(1)}
-                </td>
-                <td style={{ padding: "8px 12px", color: errorColor(svc.error_rate ?? 0) }}>
-                  {((svc.error_rate ?? 0) * 100).toFixed(1)}%
-                </td>
-                <td style={{ padding: "8px 12px", fontVariantNumeric: "tabular-nums" }}>
-                  {(svc.p50_latency_ms ?? 0).toFixed(0)}ms
-                </td>
-                <td style={{ padding: "8px 12px", fontVariantNumeric: "tabular-nums" }}>
-                  {(svc.p95_latency_ms ?? 0).toFixed(0)}ms
-                </td>
-                <td style={{ padding: "8px 12px" }}>
-                  <div
+          {emptyStateMessage ||
+            "No Cloud Run services discovered yet. Configure GCP access and refresh."}
+        </div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              minWidth: 940,
+            }}
+          >
+            <thead>
+              <tr style={{ background: socColors.bgPanel }}>
+                {[
+                  "Service",
+                  "Region",
+                  "Revision",
+                  "Instances",
+                  "Req / bucket",
+                  "Err %",
+                  "p50",
+                  "p95",
+                  "Risk",
+                  "Status",
+                ].map((column) => (
+                  <th
+                    key={column}
                     style={{
-                      display: "inline-block",
-                      width: 40,
-                      height: 6,
-                      borderRadius: 3,
-                      background: socColors.border,
-                      overflow: "hidden",
+                      padding: "12px 18px",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: socColors.textMuted,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      textAlign: "left",
+                      borderBottom: `1px solid ${socColors.border}`,
                     }}
                   >
-                    <div
+                    {column}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {services.map((service) => {
+                const selected = selectedService === service.service_name;
+                return (
+                  <tr
+                    key={`${service.service_name}-${service.region}`}
+                    onClick={() => onSelectService(service.service_name)}
+                    style={{
+                      background: selected ? socColors.bgCardHover : "transparent",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <td style={cellStyle(true)}>
+                      <div style={{ fontWeight: 700, color: socColors.text }}>
+                        {service.service_name}
+                      </div>
+                      {service.url && (
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 12,
+                            color: socColors.textDim,
+                            maxWidth: 220,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {service.url}
+                        </div>
+                      )}
+                    </td>
+                    <td style={cellStyle()}>{service.region}</td>
+                    <td
                       style={{
-                        width: `${Math.min(100, (svc.risk_score ?? 0) * 100)}%`,
-                        height: "100%",
-                        background: riskColor(svc.risk_score ?? 0),
-                        borderRadius: 3,
+                        ...cellStyle(),
+                        fontFamily: typography.fontMono,
+                        color: socColors.textDim,
                       }}
-                    />
-                  </div>
-                </td>
-                <td style={{ padding: "8px 12px" }}>
-                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                    {(svc.risk_tags || []).map((tag, i) => (
-                      <span
-                        key={i}
+                    >
+                      {service.latest_revision?.split("-").pop() || "n/a"}
+                    </td>
+                    <td style={cellStyle()}>
+                      {service.sample_missing ? "Discovery only" : service.instance_count ?? 0}
+                    </td>
+                    <td style={cellStyle()}>{(service.request_rate ?? 0).toFixed(1)}</td>
+                    <td style={{ ...cellStyle(), color: errorColor(service.error_rate ?? 0) }}>
+                      {((service.error_rate ?? 0) * 100).toFixed(1)}%
+                    </td>
+                    <td style={cellStyle()}>{formatLatency(service.p50_latency_ms ?? 0, service.sample_missing)}</td>
+                    <td style={cellStyle()}>{formatLatency(service.p95_latency_ms ?? 0, service.sample_missing)}</td>
+                    <td style={cellStyle()}>
+                      <div
                         style={{
-                          fontSize: 10,
-                          padding: "1px 6px",
-                          borderRadius: 4,
-                          background: socColors.criticalBg,
-                          color: socColors.critical,
-                          whiteSpace: "nowrap",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
                         }}
                       >
-                        {tag}
+                        <div
+                          style={{
+                            width: 68,
+                            height: 8,
+                            borderRadius: 999,
+                            overflow: "hidden",
+                            background: socColors.bgPanel,
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: `${Math.max(6, Math.min(100, (service.risk_score ?? 0) * 100))}%`,
+                              height: "100%",
+                              borderRadius: 999,
+                              background: riskColor(service.risk_score ?? 0),
+                            }}
+                          />
+                        </div>
+                        <span style={{ fontSize: 12, color: socColors.textDim }}>
+                          {Math.round((service.risk_score ?? 0) * 100)}
+                        </span>
+                      </div>
+                    </td>
+                    <td style={cellStyle()}>
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          borderRadius: 999,
+                          padding: "6px 10px",
+                          background: service.sample_missing
+                            ? socColors.infoBg
+                            : socColors.safeBg,
+                          color: service.sample_missing
+                            ? socColors.textMuted
+                            : socColors.safe,
+                          fontSize: 12,
+                          fontWeight: 600,
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: 7,
+                            height: 7,
+                            borderRadius: "50%",
+                            background: service.sample_missing
+                              ? socColors.textDim
+                              : socColors.safe,
+                          }}
+                        />
+                        {service.sample_missing ? "No health sample" : "Sampled"}
                       </span>
-                    ))}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function cellStyle(emphasis = false) {
+  return {
+    padding: "16px 18px",
+    borderBottom: `1px solid ${socColors.border}`,
+    fontSize: 13,
+    color: emphasis ? socColors.text : socColors.textMuted,
+    fontWeight: emphasis ? 600 : 500,
+    verticalAlign: "top" as const,
+  };
+}
+
+function SectionHeader({ title, subtitle }: { title: string; subtitle: string }) {
+  return (
+    <div
+      style={{
+        padding: "18px 20px 14px",
+        borderBottom: `1px solid ${socColors.border}`,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+        flexWrap: "wrap",
+      }}
+    >
+      <div>
+        <div
+          style={{
+            fontSize: 12,
+            fontWeight: 700,
+            color: socColors.textMuted,
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+          }}
+        >
+          {title}
+        </div>
+        <div style={{ marginTop: 6, fontSize: 13, color: socColors.textDim }}>
+          {subtitle}
+        </div>
       </div>
     </div>
   );

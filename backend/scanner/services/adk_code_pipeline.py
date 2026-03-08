@@ -7,6 +7,8 @@ import os
 import re
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from functools import cached_property
 
 from django.utils import timezone
@@ -37,23 +39,102 @@ from .github_client import get_source_files as get_github_source_files
 
 logger = logging.getLogger(__name__)
 
-CHUNK_LINE_WINDOW = 120
-CHUNK_LINE_OVERLAP = 20
-SUMMARY_BATCH_SIZE = 25
 MAX_EVIDENCE_CHUNKS = 8
-MAX_CANDIDATES_PER_PASS = 15
-MAX_TOTAL_CANDIDATES = 100
 MAX_PREVIEW_SNIPPET_CHARS = 1200
 
-RISK_PASSES = [
-    "injection",
-    "authz",
-    "secrets",
-    "file_io",
-    "network_ssrf",
-    "deserialization",
+
+@dataclass(frozen=True)
+class ScanProfile:
+    mode: str
+    model_name_override: str | None
+    chunk_line_window: int
+    chunk_line_overlap: int
+    summary_batch_size: int
+    risk_passes: tuple[str, ...]
+    max_candidates_per_pass: int
+    max_total_candidates: int
+    max_verification_candidates: int | None
+    github_fetch_workers: int
+    source_file_cap: int | None
+    source_line_cap: int | None
+    chunk_workers: int
+    verification_workers: int
+
+
+FAST_SCAN_PROFILE = ScanProfile(
+    mode="fast",
+    model_name_override="gemini-2.5-flash",
+    chunk_line_window=220,
+    chunk_line_overlap=10,
+    summary_batch_size=25,
+    risk_passes=("injection", "authz", "secrets", "file_io", "network_ssrf"),
+    max_candidates_per_pass=8,
+    max_total_candidates=30,
+    max_verification_candidates=12,
+    github_fetch_workers=8,
+    source_file_cap=120,
+    source_line_cap=25000,
+    chunk_workers=1,
+    verification_workers=1,
+)
+
+FULL_SCAN_PROFILE = ScanProfile(
+    mode="full",
+    model_name_override=None,
+    chunk_line_window=120,
+    chunk_line_overlap=20,
+    summary_batch_size=25,
+    risk_passes=(
+        "injection",
+        "authz",
+        "secrets",
+        "file_io",
+        "network_ssrf",
+        "deserialization",
+        "crypto",
+    ),
+    max_candidates_per_pass=15,
+    max_total_candidates=100,
+    max_verification_candidates=None,
+    github_fetch_workers=12,
+    source_file_cap=None,
+    source_line_cap=None,
+    chunk_workers=4,
+    verification_workers=4,
+)
+
+FAST_PATH_KEYWORDS = (
+    "auth",
+    "login",
+    "session",
+    "token",
+    "secret",
+    "key",
+    "api",
+    "route",
+    "controller",
+    "middleware",
+    "admin",
+    "upload",
+    "db",
+    "sql",
+    "query",
+    "serialize",
     "crypto",
-]
+)
+
+FAST_EXCLUDED_PATH_KEYWORDS = (
+    "test",
+    "tests",
+    "__tests__",
+    "spec",
+    "docs",
+    "example",
+    "examples",
+    "fixtures",
+    "generated",
+    "vendor",
+)
 
 LANGUAGE_BY_EXTENSION = {
     ".py": "python",
@@ -259,6 +340,16 @@ def _detect_language(file_path: str) -> str:
     return LANGUAGE_BY_EXTENSION.get(ext.lower(), "text")
 
 
+def _get_scan_profile(scan_mode: str | None) -> ScanProfile:
+    return FULL_SCAN_PROFILE if scan_mode == GitHubScan.Mode.FULL else FAST_SCAN_PROFILE
+
+
+def _resolve_model_name(user_id: int | None, profile: ScanProfile) -> str:
+    from cyberlens.utils import get_user_gemini_model
+
+    return profile.model_name_override or get_user_gemini_model(user_id)
+
+
 def _build_llm_model(model_name: str, api_key: str) -> ScopedGemini:
     return ScopedGemini(model=model_name, api_key=api_key)
 
@@ -301,18 +392,98 @@ def _infer_role_flags(file_path: str, content: str) -> list[str]:
     return sorted(flags)
 
 
-def _iter_chunk_ranges(total_lines: int) -> list[tuple[int, int]]:
+def _iter_chunk_ranges(total_lines: int, profile: ScanProfile) -> list[tuple[int, int]]:
     if total_lines <= 0:
         return []
     ranges = []
     start = 1
     while start <= total_lines:
-        end = min(total_lines, start + CHUNK_LINE_WINDOW - 1)
+        end = min(total_lines, start + profile.chunk_line_window - 1)
         ranges.append((start, end))
         if end == total_lines:
             break
-        start = max(end - CHUNK_LINE_OVERLAP + 1, start + 1)
+        start = max(end - profile.chunk_line_overlap + 1, start + 1)
     return ranges
+
+
+def _fast_path_score(file_path: str, content: str) -> int:
+    lower_path = file_path.lower()
+    base = os.path.basename(lower_path)
+    content_head = content[:4000].lower()
+    score = 0
+
+    if any(keyword in lower_path for keyword in FAST_PATH_KEYWORDS):
+        score += 80
+    if any(keyword in content_head for keyword in FAST_PATH_KEYWORDS):
+        score += 25
+    if base in {
+        "package.json",
+        "package-lock.json",
+        "requirements.txt",
+        "pipfile",
+        "pyproject.toml",
+        "go.mod",
+        "pom.xml",
+        "gemfile",
+        "dockerfile",
+        "docker-compose.yml",
+        "docker-compose.yaml",
+    }:
+        score += 120
+    if any(token in lower_path for token in ("config", "settings", ".env")):
+        score += 60
+    if lower_path.count("/") <= 2:
+        score += 10
+    return score
+
+
+def _is_fast_excluded_path(file_path: str) -> bool:
+    lower_path = file_path.lower()
+    return any(token in lower_path for token in FAST_EXCLUDED_PATH_KEYWORDS)
+
+
+def _select_source_files(
+    source_files: dict[str, str],
+    profile: ScanProfile,
+) -> dict[str, str]:
+    if profile.mode != GitHubScan.Mode.FAST:
+        return dict(sorted(source_files.items()))
+
+    ranked = []
+    for file_path, content in source_files.items():
+        score = _fast_path_score(file_path, content)
+        if _is_fast_excluded_path(file_path) and score < 80:
+            continue
+        ranked.append((score, file_path, content))
+
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    selected: dict[str, str] = {}
+    consumed_lines = 0
+
+    for score, file_path, content in ranked:
+        if profile.source_file_cap is not None and len(selected) >= profile.source_file_cap:
+            break
+        line_count = max(len(content.splitlines()), 1)
+        if (
+            profile.source_line_cap is not None
+            and consumed_lines >= profile.source_line_cap
+            and score < 80
+        ):
+            break
+        if (
+            profile.source_line_cap is not None
+            and consumed_lines + line_count > profile.source_line_cap
+            and selected
+            and score < 120
+        ):
+            continue
+        selected[file_path] = content
+        consumed_lines += line_count
+
+    if not selected:
+        return dict(sorted(source_files.items()))
+
+    return dict(sorted(selected.items()))
 
 
 def _get_snippet(
@@ -716,11 +887,65 @@ def _create_file_indexes(scan: GitHubScan, source_files: dict[str, str]) -> list
     return file_indexes
 
 
+def _summarize_single_chunk(
+    *,
+    scan: GitHubScan,
+    file_info: CodeScanFileIndex,
+    content: str,
+    start_line: int,
+    end_line: int,
+    file_index: int,
+    total_files: int,
+    job_index: int,
+    user_id: int | None,
+    model_name: str,
+    api_key: str,
+) -> tuple[dict, dict[str, int]]:
+    chunk_key = f"{scan.id}:{file_info.path}:{start_line}-{end_line}"
+    snippet = _get_snippet(content, start_line, end_line, limit=4000)
+    agent = _build_chunk_summary_agent(_build_llm_model(model_name, api_key))
+    result, metrics, _ = _run_structured_agent(
+        scan=scan,
+        agent=agent,
+        phase=AdkTraceEvent.Phase.CHUNK_SUMMARY,
+        label=f"Summarize {file_info.path}:{start_line}-{end_line}",
+        parent_key=chunk_key,
+        input_payload={
+            "chunk_key": chunk_key,
+            "file_path": file_info.path,
+            "language": file_info.language,
+            "role_flags": file_info.role_flags_json,
+            "start_line": start_line,
+            "end_line": end_line,
+            "code": snippet,
+        },
+        schema_cls=ChunkSummary,
+        session_id=f"code-scan-{scan.id}-chunk-{job_index}",
+        app_name="cyberlens_code_chunk_summary",
+        service_name="code_scan_chunk_summary",
+        user_id=user_id,
+        model_name=model_name,
+        api_key=api_key,
+        code_stream_meta={
+            "file_path": file_info.path,
+            "file_index": file_index,
+            "total_files": total_files,
+        },
+    )
+    return {
+        "chunk_key": chunk_key,
+        "start_line": start_line,
+        "end_line": end_line,
+        "summary": result.model_dump(),
+    }, metrics
+
+
 def _summarize_chunks(
     *,
     scan: GitHubScan,
     source_files: dict[str, str],
     file_indexes: list[CodeScanFileIndex],
+    profile: ScanProfile,
     user_id: int | None,
     model_name: str,
     api_key: str,
@@ -738,17 +963,20 @@ def _summarize_chunks(
     )
     update_scan_phase(scan, AdkTraceEvent.Phase.CHUNK_SUMMARY)
 
-    agent = _build_chunk_summary_agent(_build_llm_model(model_name, api_key))
     created_chunks: list[CodeScanChunk] = []
     suspicious_chunks = 0
     files_scanned = 0
     total_files = len(file_indexes)
     chunk_ranges_by_file = {
-        file_info.id: _iter_chunk_ranges(len(source_files[file_info.path].splitlines()))
+        file_info.id: _iter_chunk_ranges(
+            len(source_files[file_info.path].splitlines()),
+            profile,
+        )
         for file_info in file_indexes
     }
     total_chunks = sum(len(ranges) for ranges in chunk_ranges_by_file.values())
     completed_chunks = 0
+    job_counter = 0
 
     record_phase_metric(
         scan,
@@ -778,49 +1006,65 @@ def _summarize_chunks(
             }
         )
 
-        total_lines = len(content.splitlines())
         suspicious_for_file = 0
-
+        chunk_jobs = []
         for start_line, end_line in chunk_ranges_by_file.get(file_info.id, []):
-            chunk_key = f"{scan.id}:{file_info.path}:{start_line}-{end_line}"
-            snippet = _get_snippet(content, start_line, end_line, limit=4000)
-            result, metrics, _ = _run_structured_agent(
-                scan=scan,
-                agent=agent,
-                phase=AdkTraceEvent.Phase.CHUNK_SUMMARY,
-                label=f"Summarize {file_info.path}:{start_line}-{end_line}",
-                parent_key=chunk_key,
-                input_payload={
-                    "chunk_key": chunk_key,
-                    "file_path": file_info.path,
-                    "language": file_info.language,
-                    "role_flags": file_info.role_flags_json,
-                    "start_line": start_line,
-                    "end_line": end_line,
-                    "code": snippet,
-                },
-                schema_cls=ChunkSummary,
-                session_id=f"code-scan-{scan.id}-chunk-{len(created_chunks)}",
-                app_name="cyberlens_code_chunk_summary",
-                service_name="code_scan_chunk_summary",
-                user_id=user_id,
-                model_name=model_name,
-                api_key=api_key,
-                code_stream_meta={
-                    "file_path": file_info.path,
-                    "file_index": file_index,
-                    "total_files": total_files,
-                },
-            )
+            chunk_jobs.append((start_line, end_line, job_counter))
+            job_counter += 1
+
+        if profile.chunk_workers > 1 and len(chunk_jobs) > 1:
+            results = []
+            with ThreadPoolExecutor(max_workers=min(profile.chunk_workers, len(chunk_jobs))) as executor:
+                future_map = {
+                    executor.submit(
+                        _summarize_single_chunk,
+                        scan=scan,
+                        file_info=file_info,
+                        content=content,
+                        start_line=start_line,
+                        end_line=end_line,
+                        file_index=file_index,
+                        total_files=total_files,
+                        job_index=job_index,
+                        user_id=user_id,
+                        model_name=model_name,
+                        api_key=api_key,
+                    ): (start_line, end_line)
+                    for start_line, end_line, job_index in chunk_jobs
+                }
+                for future in as_completed(future_map):
+                    results.append(future.result())
+        else:
+            results = [
+                _summarize_single_chunk(
+                    scan=scan,
+                    file_info=file_info,
+                    content=content,
+                    start_line=start_line,
+                    end_line=end_line,
+                    file_index=file_index,
+                    total_files=total_files,
+                    job_index=job_index,
+                    user_id=user_id,
+                    model_name=model_name,
+                    api_key=api_key,
+                )
+                for start_line, end_line, job_index in chunk_jobs
+            ]
+
+        for summary_result, metrics in sorted(
+            results,
+            key=lambda item: (item[0]["start_line"], item[0]["end_line"]),
+        ):
             _accumulate_totals(totals, metrics)
             _publish_token_update(scan, totals, files_scanned=files_scanned)
-            summary_dict = result.model_dump()
+            summary_dict = summary_result["summary"]
             chunk = CodeScanChunk.objects.create(
                 file_index=file_info,
-                chunk_key=chunk_key,
+                chunk_key=summary_result["chunk_key"],
                 chunk_kind="window",
-                start_line=start_line,
-                end_line=end_line,
+                start_line=summary_result["start_line"],
+                end_line=summary_result["end_line"],
                 summary_json=summary_dict,
                 signals_json=summary_dict.get("security_signals", []),
                 summary_status="completed",
@@ -836,12 +1080,15 @@ def _summarize_chunks(
                 phase=AdkTraceEvent.Phase.CHUNK_SUMMARY,
                 kind=AdkTraceEvent.Kind.ARTIFACT_CREATED,
                 status="success",
-                label=f"Chunk indexed {file_info.path}:{start_line}-{end_line}",
-                parent_key=chunk_key,
+                label=(
+                    f"Chunk indexed {file_info.path}:"
+                    f"{summary_result['start_line']}-{summary_result['end_line']}"
+                ),
+                parent_key=summary_result["chunk_key"],
                 payload_json={
-                    "chunk_key": chunk_key,
+                    "chunk_key": summary_result["chunk_key"],
                     "file_path": file_info.path,
-                    "line_range": [start_line, end_line],
+                    "line_range": [summary_result["start_line"], summary_result["end_line"]],
                     "security_signals": summary_dict.get("security_signals", []),
                     "summary_preview": clip_text_preview(summary_dict.get("summary", ""), limit=300),
                 },
@@ -864,7 +1111,10 @@ def _summarize_chunks(
                         "completed_chunks": completed_chunks,
                         "total_chunks": total_chunks,
                         "current_file": file_info.path,
-                        "current_line_range": [start_line, end_line],
+                        "current_line_range": [
+                            summary_result["start_line"],
+                            summary_result["end_line"],
+                        ],
                         "suspicious_chunks": suspicious_chunks,
                     },
                 )
@@ -920,7 +1170,7 @@ def _summarize_chunks(
         AdkTraceEvent.Phase.CHUNK_SUMMARY,
         {"chunk_count": len(created_chunks), "suspicious_chunk_count": suspicious_chunks},
     )
-    return created_chunks
+    return sorted(created_chunks, key=lambda chunk: (chunk.file_index.path, chunk.start_line, chunk.id))
 
 
 def _candidate_input_from_chunks(chunks: list[CodeScanChunk]) -> list[dict]:
@@ -947,6 +1197,7 @@ def _generate_candidates(
     *,
     scan: GitHubScan,
     chunks: list[CodeScanChunk],
+    profile: ScanProfile,
     user_id: int | None,
     model_name: str,
     api_key: str,
@@ -965,9 +1216,9 @@ def _generate_candidates(
     update_scan_phase(scan, AdkTraceEvent.Phase.CANDIDATE_GENERATION)
 
     agent = _build_candidate_agent(_build_llm_model(model_name, api_key))
-    batches = _batch(_candidate_input_from_chunks(chunks), SUMMARY_BATCH_SIZE)
+    batches = _batch(_candidate_input_from_chunks(chunks), profile.summary_batch_size)
     deduped: dict[tuple[str, tuple[str, ...]], dict] = {}
-    total_batches = len(batches) * len(RISK_PASSES)
+    total_batches = len(batches) * len(profile.risk_passes)
     completed_batches = 0
 
     record_phase_metric(
@@ -980,13 +1231,13 @@ def _generate_candidates(
         payload_json={
             "completed_batches": 0,
             "total_batches": total_batches,
-            "risk_categories_total": len(RISK_PASSES),
+            "risk_categories_total": len(profile.risk_passes),
             "batches_per_category": len(batches),
             "selected_candidates": 0,
         },
     )
 
-    for pass_name in RISK_PASSES:
+    for pass_name in profile.risk_passes:
         pass_candidates: list[dict] = []
         for batch_index, batch_items in enumerate(batches, start=1):
             result, metrics, _ = _run_structured_agent(
@@ -998,7 +1249,7 @@ def _generate_candidates(
                 input_payload={
                     "risk_category": pass_name,
                     "chunks": batch_items,
-                    "max_candidates": MAX_CANDIDATES_PER_PASS,
+                    "max_candidates": profile.max_candidates_per_pass,
                 },
                 schema_cls=CandidateBatch,
                 session_id=f"code-scan-{scan.id}-candidates-{pass_name}-{batch_index}",
@@ -1038,14 +1289,16 @@ def _generate_candidates(
                     pass_candidates.append(candidate_dict)
 
         pass_candidates.sort(key=_candidate_sort_key, reverse=True)
-        for candidate_dict in pass_candidates[:MAX_CANDIDATES_PER_PASS]:
+        for candidate_dict in pass_candidates[: profile.max_candidates_per_pass]:
             key = _normalize_candidate_key(
                 candidate_dict["category"], candidate_dict["chunk_refs"]
             )
             if key not in deduped or candidate_dict["score"] > deduped[key]["score"]:
                 deduped[key] = candidate_dict
 
-    selected = sorted(deduped.values(), key=_candidate_sort_key, reverse=True)[:MAX_TOTAL_CANDIDATES]
+    selected = sorted(deduped.values(), key=_candidate_sort_key, reverse=True)[
+        : profile.max_total_candidates
+    ]
     created_candidates = []
     for candidate_dict in selected:
         candidate = CodeScanCandidate.objects.create(
@@ -1272,11 +1525,51 @@ def _build_evidence_packs(
     return evidence_packs
 
 
+def _verify_single_candidate(
+    *,
+    scan: GitHubScan,
+    candidate: CodeScanCandidate,
+    evidence_pack: dict,
+    user_id: int | None,
+    model_name: str,
+    api_key: str,
+) -> tuple[VerificationDecision, dict[str, int]]:
+    agent = _build_verifier_agent(_build_llm_model(model_name, api_key))
+    result, metrics, _ = _run_structured_agent(
+        scan=scan,
+        agent=agent,
+        phase=AdkTraceEvent.Phase.VERIFICATION,
+        label=f"Verify candidate #{candidate.id}",
+        parent_key=f"candidate:{candidate.id}",
+        input_payload={
+            "candidate": {
+                "candidate_id": candidate.id,
+                "category": candidate.category,
+                "label": candidate.label,
+                "score": candidate.score,
+                "severity_hint": candidate.severity_hint,
+                "chunk_refs": candidate.chunk_refs_json,
+                "rationale": candidate.rationale,
+            },
+            "evidence_pack": evidence_pack,
+        },
+        schema_cls=VerificationDecision,
+        session_id=f"code-scan-{scan.id}-verify-{candidate.id}",
+        app_name="cyberlens_code_verifier",
+        service_name="code_scan_verification",
+        user_id=user_id,
+        model_name=model_name,
+        api_key=api_key,
+    )
+    return result, metrics
+
+
 def _verify_candidates(
     *,
     scan: GitHubScan,
     candidates: list[CodeScanCandidate],
     evidence_packs: list[dict],
+    profile: ScanProfile,
     user_id: int | None,
     model_name: str,
     api_key: str,
@@ -1295,7 +1588,6 @@ def _verify_candidates(
     update_scan_phase(scan, AdkTraceEvent.Phase.VERIFICATION)
 
     evidence_by_candidate = {pack["candidate_id"]: pack for pack in evidence_packs}
-    agent = _build_verifier_agent(_build_llm_model(model_name, api_key))
     verified_count = 0
     reviewed_candidates = 0
     rejected_count = 0
@@ -1316,6 +1608,7 @@ def _verify_candidates(
         },
     )
 
+    jobs = []
     for candidate in candidates:
         evidence_pack = evidence_by_candidate.get(candidate.id)
         if not evidence_pack:
@@ -1341,33 +1634,42 @@ def _verify_candidates(
                 },
             )
             continue
+        jobs.append((candidate, evidence_pack))
 
-        result, metrics, _ = _run_structured_agent(
-            scan=scan,
-            agent=agent,
-            phase=AdkTraceEvent.Phase.VERIFICATION,
-            label=f"Verify candidate #{candidate.id}",
-            parent_key=f"candidate:{candidate.id}",
-            input_payload={
-                "candidate": {
-                    "candidate_id": candidate.id,
-                    "category": candidate.category,
-                    "label": candidate.label,
-                    "score": candidate.score,
-                    "severity_hint": candidate.severity_hint,
-                    "chunk_refs": candidate.chunk_refs_json,
-                    "rationale": candidate.rationale,
-                },
-                "evidence_pack": evidence_pack,
-            },
-            schema_cls=VerificationDecision,
-            session_id=f"code-scan-{scan.id}-verify-{candidate.id}",
-            app_name="cyberlens_code_verifier",
-            service_name="code_scan_verification",
-            user_id=user_id,
-            model_name=model_name,
-            api_key=api_key,
-        )
+    if profile.verification_workers > 1 and len(jobs) > 1:
+        ordered_results = []
+        with ThreadPoolExecutor(max_workers=min(profile.verification_workers, len(jobs))) as executor:
+            future_map = {
+                executor.submit(
+                    _verify_single_candidate,
+                    scan=scan,
+                    candidate=candidate,
+                    evidence_pack=evidence_pack,
+                    user_id=user_id,
+                    model_name=model_name,
+                    api_key=api_key,
+                ): candidate
+                for candidate, evidence_pack in jobs
+            }
+            for future in as_completed(future_map):
+                ordered_results.append((future_map[future], *future.result()))
+    else:
+        ordered_results = [
+            (
+                candidate,
+                *_verify_single_candidate(
+                    scan=scan,
+                    candidate=candidate,
+                    evidence_pack=evidence_pack,
+                    user_id=user_id,
+                    model_name=model_name,
+                    api_key=api_key,
+                ),
+            )
+            for candidate, evidence_pack in jobs
+        ]
+
+    for candidate, result, metrics in sorted(ordered_results, key=lambda item: item[0].id):
         _accumulate_totals(totals, metrics)
         _update_scan_token_totals(scan, totals, files_scanned=scan.code_scan_files_scanned)
         _publish_token_update(scan, totals)
@@ -1603,6 +1905,7 @@ def _run_repo_synthesis(
 def _run_code_scan_pipeline(
     scan_id: int,
     source_files: dict[str, str],
+    profile: ScanProfile,
     user_id: int | None,
     model_name: str,
     api_key: str,
@@ -1687,6 +1990,7 @@ def _run_code_scan_pipeline(
         scan=scan,
         source_files=source_files,
         file_indexes=file_indexes,
+        profile=profile,
         user_id=user_id,
         model_name=model_name,
         api_key=api_key,
@@ -1695,21 +1999,34 @@ def _run_code_scan_pipeline(
     candidates = _generate_candidates(
         scan=scan,
         chunks=chunks,
+        profile=profile,
         user_id=user_id,
         model_name=model_name,
         api_key=api_key,
         totals=totals,
     )
+    verification_candidates = candidates
+    if (
+        profile.max_verification_candidates is not None
+        and len(candidates) > profile.max_verification_candidates
+    ):
+        verification_candidates = candidates[: profile.max_verification_candidates]
+        deferred_candidates = candidates[profile.max_verification_candidates :]
+        for candidate in deferred_candidates:
+            candidate.status = "deferred"
+        if deferred_candidates:
+            CodeScanCandidate.objects.bulk_update(deferred_candidates, ["status"])
     evidence_packs = _build_evidence_packs(
         scan=scan,
-        candidates=candidates,
+        candidates=verification_candidates,
         chunks=chunks,
         source_files=source_files,
     )
     verified_count = _verify_candidates(
         scan=scan,
-        candidates=candidates,
+        candidates=verification_candidates,
         evidence_packs=evidence_packs,
+        profile=profile,
         user_id=user_id,
         model_name=model_name,
         api_key=api_key,
@@ -1746,14 +2063,14 @@ def scan_code_security_github(
 ) -> None:
     from cyberlens.utils import (
         get_google_api_key,
-        get_user_gemini_model,
         probe_gemini_api_connection,
     )
 
     scan = GitHubScan.objects.get(id=scan_id)
     _reset_code_scan_state(scan)
+    profile = _get_scan_profile(scan.scan_mode)
     api_key = get_google_api_key(user_id=user_id)
-    model_name = get_user_gemini_model(user_id)
+    model_name = _resolve_model_name(user_id, profile)
     if not api_key:
         logger.warning("GOOGLE_API_KEY not set, skipping code security scan")
         _record_code_inventory_terminal_warning(
@@ -1776,7 +2093,12 @@ def scan_code_security_github(
         )
         return
 
-    source_files = get_github_source_files(pat, repo_full_name)
+    source_files = get_github_source_files(
+        pat,
+        repo_full_name,
+        max_workers=profile.github_fetch_workers,
+    )
+    source_files = _select_source_files(source_files, profile)
     if not source_files:
         logger.info("No source files found in GitHub repo for code security scan")
         _record_code_inventory_terminal_warning(
@@ -1791,6 +2113,7 @@ def scan_code_security_github(
     _run_code_scan_pipeline(
         scan_id,
         source_files,
+        profile,
         user_id=user_id,
         model_name=model_name,
         api_key=api_key,
@@ -1800,15 +2123,15 @@ def scan_code_security_github(
 def scan_code_security(scan_id: int, dir_path: str, user_id: int | None = None) -> None:
     from cyberlens.utils import (
         get_google_api_key,
-        get_user_gemini_model,
         probe_gemini_api_connection,
     )
     from .local_client import get_source_files as get_local_source_files
 
     scan = GitHubScan.objects.get(id=scan_id)
     _reset_code_scan_state(scan)
+    profile = _get_scan_profile(scan.scan_mode)
     api_key = get_google_api_key(user_id=user_id)
-    model_name = get_user_gemini_model(user_id)
+    model_name = _resolve_model_name(user_id, profile)
     if not api_key:
         logger.warning("GOOGLE_API_KEY not set, skipping code security scan")
         _record_code_inventory_terminal_warning(
@@ -1843,6 +2166,7 @@ def scan_code_security(scan_id: int, dir_path: str, user_id: int | None = None) 
         )
         return
 
+    source_files = _select_source_files(source_files, profile)
     if not source_files:
         logger.info("No source files found for code security scan")
         _record_code_inventory_terminal_warning(
@@ -1857,6 +2181,7 @@ def scan_code_security(scan_id: int, dir_path: str, user_id: int | None = None) 
     _run_code_scan_pipeline(
         scan_id,
         source_files,
+        profile,
         user_id=user_id,
         model_name=model_name,
         api_key=api_key,

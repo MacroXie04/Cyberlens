@@ -13,6 +13,10 @@ class GitHubScan(models.Model):
         GITHUB = "github", "GitHub"
         LOCAL = "local", "Local"
 
+    class Mode(models.TextChoices):
+        FAST = "fast", "Fast Scan"
+        FULL = "full", "Full Scan"
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -24,6 +28,9 @@ class GitHubScan(models.Model):
     repo_url = models.CharField(max_length=500)
     scan_source = models.CharField(
         max_length=10, choices=Source.choices, default=Source.GITHUB
+    )
+    scan_mode = models.CharField(
+        max_length=10, choices=Mode.choices, default=Mode.FAST
     )
     scan_status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.PENDING
@@ -40,8 +47,10 @@ class GitHubScan(models.Model):
     code_scan_files_total = models.IntegerField(default=0)
     code_scan_phase = models.CharField(max_length=50, blank=True, default="")
     code_scan_stats_json = models.JSONField(default=dict)
+    trace_sequence_counter = models.IntegerField(default=0)
     error_message = models.TextField(blank=True, default="")
     scanned_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-scanned_at"]

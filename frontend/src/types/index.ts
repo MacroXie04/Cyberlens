@@ -75,6 +75,7 @@ export interface GitHubScan {
   repo_name: string;
   repo_url: string;
   scan_source: "github" | "local";
+  scan_mode: ScanMode;
   scan_status: "pending" | "scanning" | "completed" | "failed";
   total_deps: number;
   vulnerable_deps: number;
@@ -82,6 +83,10 @@ export interface GitHubScan {
   dependency_score: number;
   code_security_score: number;
   scanned_at: string;
+  started_at?: string;
+  completed_at?: string | null;
+  duration_ms?: number;
+  code_findings_count?: number;
   code_scan_input_tokens: number;
   code_scan_output_tokens: number;
   code_scan_total_tokens: number;
@@ -92,6 +97,29 @@ export interface GitHubScan {
   error_message?: string;
   dependencies?: Dependency[];
   code_findings?: CodeFinding[];
+}
+
+export type ScanMode = "fast" | "full";
+
+export interface GitHubScanHistoryItem {
+  id: number;
+  repo_name: string;
+  repo_url: string;
+  scan_source: "github" | "local";
+  scan_mode: ScanMode;
+  scan_status: "pending" | "scanning" | "completed" | "failed";
+  total_deps: number;
+  vulnerable_deps: number;
+  security_score: number;
+  dependency_score: number;
+  code_security_score: number;
+  code_findings_count: number;
+  code_scan_phase?: string;
+  scanned_at: string;
+  started_at?: string;
+  completed_at?: string | null;
+  duration_ms?: number;
+  error_message?: string;
 }
 
 export interface Dependency {
@@ -274,6 +302,19 @@ export interface AdkTraceSnapshot {
   artifacts: AdkArtifactSummary;
 }
 
+export interface DerivedAgentActivity {
+  status: "idle" | "pending" | "running" | "success" | "warning" | "error";
+  phase: AdkTracePhase | null;
+  phase_label: string;
+  title: string;
+  subject: string;
+  progress_text: string;
+  updated_at: string | null;
+  warning_message?: string;
+  error_message?: string;
+  recent_events: AdkTraceEvent[];
+}
+
 // ---------------------------------------------------------------------------
 // GCP Estate & Security Types
 // ---------------------------------------------------------------------------
@@ -288,7 +329,30 @@ export interface GcpEstateSummary {
   total_events_recent: number;
   total_services: number;
   unhealthy_revisions: number;
+  coverage_start: string | null;
+  coverage_end: string | null;
+  history_ready: boolean;
+  backfill_status: GcpBackfillStatus | null;
   collection_errors?: Record<string, string>;
+}
+
+export type LiveMonitorMode = "history" | "live";
+
+export interface GcpBackfillStatus {
+  status?: "idle" | "running" | "complete" | "failed";
+  days?: number;
+  started_at?: string | null;
+  updated_at?: string | null;
+  error?: string | null;
+  coverage_start?: string | null;
+  coverage_end?: string | null;
+}
+
+export interface GcpHistoryStatus {
+  coverage_start: string | null;
+  coverage_end: string | null;
+  history_ready: boolean;
+  backfill_status: GcpBackfillStatus | null;
 }
 
 export interface GcpObservedService {
@@ -308,6 +372,7 @@ export interface GcpObservedService {
   p95_latency_ms: number;
   p99_latency_ms: number;
   updated_at: string;
+  sample_missing?: boolean;
 }
 
 export type GcpEventSource =
@@ -360,7 +425,7 @@ export interface GcpSecurityEvent {
   raw_payload_preview: string;
   fact_fields: Record<string, unknown>;
   inference_fields: Record<string, unknown>;
-  incident_id: number | null;
+  incident?: number | null;
 }
 
 export type GcpIncidentPriority = "p1" | "p2" | "p3" | "p4";
@@ -427,6 +492,29 @@ export interface GcpThreatTimeseriesPoint {
   value: number;
 }
 
+export interface GcpTimelinePoint {
+  ts: string;
+  requests: number;
+  errors: number;
+  incident_count: number;
+}
+
+export interface GcpTimelineMarker {
+  id: string;
+  kind: "incident" | "event";
+  ts: string;
+  severity: string;
+  title: string;
+}
+
+export interface GcpTimelineResponse extends GcpHistoryStatus {
+  start: string;
+  end: string;
+  bucket: string;
+  points: GcpTimelinePoint[];
+  markers: GcpTimelineMarker[];
+}
+
 export interface GcpGeoThreatPoint {
   country: string;
   geo_lat: number | null;
@@ -453,6 +541,19 @@ export interface GcpSettings {
   gcp_regions: string[];
   gcp_service_filters: string[];
   gcp_enabled_sources: string[];
+}
+
+export interface GcpReplaySnapshot {
+  cursor: string;
+  window_start: string;
+  window_end: string;
+  summary: GcpEstateSummary;
+  services: GcpObservedService[];
+  map: GcpGeoThreatPoint[];
+  perimeter: Record<string, number>;
+  events: GcpSecurityEvent[];
+  incidents: GcpSecurityIncident[];
+  history_status: GcpHistoryStatus;
 }
 
 export type SelectedProject =

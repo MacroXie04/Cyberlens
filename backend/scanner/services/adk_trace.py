@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
+from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 
@@ -54,9 +55,14 @@ def _get_scan(scan_or_id: GitHubScan | int) -> GitHubScan:
 
 
 def next_trace_sequence(scan_or_id: GitHubScan | int) -> int:
-    scan = _get_scan(scan_or_id)
-    current = scan.adk_trace_events.aggregate(max_seq=Max("sequence")).get("max_seq") or 0
-    return current + 1
+    scan_id = scan_or_id.id if isinstance(scan_or_id, GitHubScan) else scan_or_id
+    with transaction.atomic():
+        scan = GitHubScan.objects.select_for_update().get(id=scan_id)
+        current_max = scan.adk_trace_events.aggregate(max_seq=Max("sequence")).get("max_seq") or 0
+        next_value = max(scan.trace_sequence_counter, current_max) + 1
+        scan.trace_sequence_counter = next_value
+        scan.save(update_fields=["trace_sequence_counter"])
+    return next_value
 
 
 def record_trace_event(

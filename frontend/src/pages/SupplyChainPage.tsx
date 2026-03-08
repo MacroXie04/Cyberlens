@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 
 import AdkPipelineView from "../components/SupplyChain/AdkPipelineView";
 import AgentActivityPanel from "../components/SupplyChain/AgentActivityPanel";
@@ -6,15 +7,17 @@ import AgentRequestLog from "../components/SupplyChain/AgentRequestLog";
 import AiRemediationReport from "../components/SupplyChain/AiRemediationReport";
 import CodeScanLiveView from "../components/SupplyChain/CodeScanLiveView";
 import CodeSecurityFindings from "../components/SupplyChain/CodeSecurityFindings";
+import DependencyInventory from "../components/SupplyChain/DependencyInventory";
 import DependencyTree from "../components/SupplyChain/DependencyTree";
 import ScanProgress from "../components/SupplyChain/ScanProgress";
 import VulnerabilityList from "../components/SupplyChain/VulnerabilityList";
+import { deriveAgentActivity } from "../components/SupplyChain/activity";
 import { useSocket } from "../hooks/useSocket";
-import { deriveScanProgress, type ScanProgressStep } from "./supplyChainScanProgress";
 import {
   getAdkTraceSnapshot,
   getAiReport,
   getCodeFindings,
+  getScanHistory,
   getScanResults,
   triggerScan,
 } from "../services/api";
@@ -29,10 +32,13 @@ import type {
   CodeScanStreamEvent,
   Dependency,
   GitHubScan,
+  GitHubScanHistoryItem,
+  ScanMode,
   SelectedProject,
 } from "../types";
+import { deriveScanProgress, type ScanProgressStep } from "./supplyChainScanProgress";
 
-type ResultTab = "overview" | "vulnerabilities" | "code" | "pipeline";
+type ResultTab = "overview" | "dependencies" | "vulnerabilities" | "code" | "pipeline";
 
 interface Props {
   selectedProject: SelectedProject;
@@ -257,12 +263,91 @@ function mergeTraceEvent(previous: AdkTraceSnapshot | null, event: AdkTraceEvent
   };
 }
 
-function scanStorageKey(repoFullName: string): string {
-  return `scan:${repoFullName}`;
+function upsertHistoryItem(
+  previous: GitHubScanHistoryItem[],
+  nextItem: GitHubScanHistoryItem
+): GitHubScanHistoryItem[] {
+  return [...previous.filter((item) => item.id !== nextItem.id), nextItem].sort(
+    (left, right) => new Date(right.scanned_at).getTime() - new Date(left.scanned_at).getTime()
+  );
+}
+
+function scanToHistoryItem(scan: GitHubScan): GitHubScanHistoryItem {
+  return {
+    id: scan.id,
+    repo_name: scan.repo_name,
+    repo_url: scan.repo_url,
+    scan_source: scan.scan_source,
+    scan_mode: scan.scan_mode,
+    scan_status: scan.scan_status,
+    total_deps: scan.total_deps,
+    vulnerable_deps: scan.vulnerable_deps,
+    security_score: scan.security_score,
+    dependency_score: scan.dependency_score,
+    code_security_score: scan.code_security_score,
+    code_findings_count:
+      scan.code_findings_count ?? scan.code_findings?.length ?? 0,
+    code_scan_phase: scan.code_scan_phase,
+    scanned_at: scan.scanned_at,
+    started_at: scan.started_at,
+    completed_at: scan.completed_at ?? null,
+    duration_ms: scan.duration_ms,
+    error_message: scan.error_message,
+  };
+}
+
+function formatTime(value?: string | null): string {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
+function formatDuration(durationMs?: number): string {
+  if (!durationMs) return "-";
+  if (durationMs < 1000) return `${durationMs}ms`;
+  return `${(durationMs / 1000).toFixed(1)}s`;
+}
+
+function severityCounts(dependencies: Dependency[], findings: CodeFinding[]) {
+  const vulnerabilityCounts = { critical: 0, high: 0, medium: 0, low: 0 };
+  for (const dependency of dependencies) {
+    for (const vulnerability of dependency.vulnerabilities || []) {
+      const severity = vulnerability.severity as keyof typeof vulnerabilityCounts;
+      if (severity in vulnerabilityCounts) {
+        vulnerabilityCounts[severity] += 1;
+      }
+    }
+  }
+
+  const codeCounts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+  for (const finding of findings) {
+    const severity = finding.severity as keyof typeof codeCounts;
+    if (severity in codeCounts) {
+      codeCounts[severity] += 1;
+    }
+  }
+
+  return { vulnerabilityCounts, codeCounts };
+}
+
+function statusTone(status: GitHubScanHistoryItem["scan_status"] | GitHubScan["scan_status"] | undefined) {
+  if (status === "completed") {
+    return { background: "rgba(46, 125, 50, 0.1)", color: "var(--md-safe)", label: "Completed" };
+  }
+  if (status === "failed") {
+    return { background: "rgba(198, 40, 40, 0.1)", color: "var(--md-error)", label: "Failed" };
+  }
+  if (status === "scanning") {
+    return { background: "rgba(2, 119, 189, 0.1)", color: "var(--md-primary)", label: "Scanning" };
+  }
+  return { background: "var(--md-surface-container-high)", color: "var(--md-on-surface-variant)", label: "Pending" };
 }
 
 export default function SupplyChainPage({ selectedProject }: Props) {
-  const [scan, setScan] = useState<GitHubScan | null>(null);
+  const [scanHistory, setScanHistory] = useState<GitHubScanHistoryItem[]>([]);
+  const [selectedScanId, setSelectedScanId] = useState<number | null>(null);
+  const [selectedScan, setSelectedScan] = useState<GitHubScan | null>(null);
   const [report, setReport] = useState<AiReport | null>(null);
   const [codeFindings, setCodeFindings] = useState<CodeFinding[]>([]);
   const [scanning, setScanning] = useState(false);
@@ -271,79 +356,22 @@ export default function SupplyChainPage({ selectedProject }: Props) {
   const [resultTab, setResultTab] = useState<ResultTab>("overview");
   const [adkTrace, setAdkTrace] = useState<AdkTraceSnapshot | null>(null);
   const [adkTraceLoading, setAdkTraceLoading] = useState(false);
-
-  const scanIdRef = useRef<number | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lastProjectKeyRef = useRef<string | null>(null);
-  const lastRealtimeEventAtRef = useRef(0);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const [codeScanStreamEvents, setCodeScanStreamEvents] = useState<CodeScanStreamEvent[]>([]);
   const [codeScanActive, setCodeScanActive] = useState(false);
-  const [_codeScanSummary, setCodeScanSummary] = useState<CodeScanStreamEvent | null>(null);
+
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const selectedScanIdRef = useRef<number | null>(null);
+  const lastProjectKeyRef = useRef<string | null>(null);
+  const lastRealtimeEventAtRef = useRef(0);
 
   const repoFullName = selectedProject?.repo.full_name || null;
 
-  const refreshLiveArtifacts = useCallback(async (scanId: number) => {
-    const [aiReportResult, findingsResult] = await Promise.allSettled([
-      getAiReport(scanId),
-      getCodeFindings(scanId),
-    ]);
-
-    if (aiReportResult.status === "fulfilled") {
-      setReport(aiReportResult.value);
-    }
-    if (findingsResult.status === "fulfilled") {
-      setCodeFindings(findingsResult.value);
-    }
-  }, []);
-
-  const loadAdkTrace = useCallback(async (scanId: number) => {
-    setAdkTraceLoading(true);
-    try {
-      const snapshot = await getAdkTraceSnapshot(scanId);
-      setAdkTrace(snapshot);
-    } catch (err) {
-      console.error("Failed to fetch ADK trace:", err);
-      setAdkTrace((current) => current || emptyTraceSnapshot());
-    } finally {
-      setAdkTraceLoading(false);
-    }
-  }, []);
-
-  const fetchScanResults = useCallback(
-    async (scanId: number) => {
-      setScanning(false);
-      setCodeScanActive(false);
-      try {
-        const results = await getScanResults(scanId);
-        setScan(results);
-
-        if (results.scan_status === "failed") {
-          setScanStep("failed");
-          setScanMessage(results.error_message || "Scan failed");
-          return;
-        }
-
-        setScanMessage("");
-        setScanStep("completed");
-
-        const [aiReportResult, findingsResult, traceResult] = await Promise.allSettled([
-          getAiReport(scanId),
-          getCodeFindings(scanId),
-          getAdkTraceSnapshot(scanId),
-        ]);
-
-        setReport(aiReportResult.status === "fulfilled" ? aiReportResult.value : null);
-        setCodeFindings(findingsResult.status === "fulfilled" ? findingsResult.value : []);
-        if (traceResult.status === "fulfilled") {
-          setAdkTrace(traceResult.value);
-        }
-      } catch (err) {
-        console.error("Failed to fetch results:", err);
-      }
-    },
-    []
-  );
+  useEffect(() => {
+    selectedScanIdRef.current = selectedScanId;
+  }, [selectedScanId]);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -352,11 +380,13 @@ export default function SupplyChainPage({ selectedProject }: Props) {
     }
   }, []);
 
-  const resetScanState = useCallback(() => {
+  const resetPageState = useCallback(() => {
     stopPolling();
-    scanIdRef.current = null;
+    selectedScanIdRef.current = null;
     lastRealtimeEventAtRef.current = 0;
-    setScan(null);
+    setScanHistory([]);
+    setSelectedScanId(null);
+    setSelectedScan(null);
     setReport(null);
     setCodeFindings([]);
     setScanning(false);
@@ -365,10 +395,71 @@ export default function SupplyChainPage({ selectedProject }: Props) {
     setResultTab("overview");
     setAdkTrace(null);
     setAdkTraceLoading(false);
+    setHistoryLoading(false);
+    setDetailLoading(false);
     setCodeScanStreamEvents([]);
     setCodeScanActive(false);
-    setCodeScanSummary(null);
   }, [stopPolling]);
+
+  const applyHistoryItem = useCallback((item: GitHubScanHistoryItem) => {
+    setScanHistory((previous) => upsertHistoryItem(previous, item));
+  }, []);
+
+  const loadScanData = useCallback(
+    async (scanId: number) => {
+      setDetailLoading(true);
+      setAdkTraceLoading(true);
+
+      const [scanResult, aiReportResult, findingsResult, traceResult] = await Promise.allSettled([
+        getScanResults(scanId),
+        getAiReport(scanId),
+        getCodeFindings(scanId),
+        getAdkTraceSnapshot(scanId),
+      ]);
+
+      if (selectedScanIdRef.current !== scanId) {
+        setDetailLoading(false);
+        setAdkTraceLoading(false);
+        return;
+      }
+
+      if (scanResult.status === "fulfilled") {
+        const nextScan = scanResult.value;
+        setSelectedScan(nextScan);
+        applyHistoryItem(scanToHistoryItem(nextScan));
+        setScanning(nextScan.scan_status === "scanning");
+        if (nextScan.scan_status === "failed") {
+          setScanStep("failed");
+          setScanMessage(nextScan.error_message || "Scan failed");
+        } else if (nextScan.scan_status === "scanning") {
+          const derived = deriveScanProgress(nextScan);
+          setScanStep(derived.step);
+          setScanMessage(derived.message);
+          if (derived.codeScanActive) {
+            setCodeScanActive(true);
+          }
+        } else {
+          setScanMessage("");
+          setScanStep("completed");
+          setCodeScanActive(false);
+        }
+      }
+
+      setReport(aiReportResult.status === "fulfilled" ? aiReportResult.value || null : null);
+      setCodeFindings(
+        findingsResult.status === "fulfilled" && Array.isArray(findingsResult.value)
+          ? findingsResult.value
+          : []
+      );
+      setAdkTrace(
+        traceResult.status === "fulfilled" ? traceResult.value : emptyTraceSnapshot()
+      );
+
+      setDetailLoading(false);
+      setAdkTraceLoading(false);
+    },
+    [applyHistoryItem]
+  );
 
   const startPolling = useCallback(
     (scanId: number) => {
@@ -376,8 +467,13 @@ export default function SupplyChainPage({ selectedProject }: Props) {
       pollRef.current = setInterval(async () => {
         try {
           const result = await getScanResults(scanId);
-          setScan(result);
-          void refreshLiveArtifacts(scanId);
+          applyHistoryItem(scanToHistoryItem(result));
+
+          if (selectedScanIdRef.current !== scanId) {
+            return;
+          }
+
+          setSelectedScan(result);
           if (
             result.scan_status === "scanning" &&
             Date.now() - lastRealtimeEventAtRef.current > 10000
@@ -389,70 +485,128 @@ export default function SupplyChainPage({ selectedProject }: Props) {
               setCodeScanActive(true);
             }
           }
+
           if (result.scan_status === "completed" || result.scan_status === "failed") {
             stopPolling();
-            if (result.scan_status === "completed") {
-              await fetchScanResults(scanId);
-            } else {
-              setScanning(false);
-              setScanMessage("Scan failed");
-              setScanStep("failed");
-              setCodeScanActive(false);
-            }
+            await loadScanData(scanId);
           }
         } catch {
-          // Polling will retry on next interval
+          // Polling will retry on the next interval.
         }
       }, 3000);
     },
-    [fetchScanResults, refreshLiveArtifacts, stopPolling]
+    [applyHistoryItem, loadScanData, stopPolling]
   );
+
+  const loadHistoryForRepo = useCallback(
+    async (repo: string) => {
+      setHistoryLoading(true);
+      try {
+        const history = await getScanHistory(repo);
+        if (lastProjectKeyRef.current !== repo) {
+          return;
+        }
+        setScanHistory(history);
+
+        if (history.length === 0) {
+          setHistoryLoading(false);
+          return;
+        }
+
+        const latest = history[0];
+        selectedScanIdRef.current = latest.id;
+        setSelectedScanId(latest.id);
+        setScanning(latest.scan_status === "scanning");
+        if (latest.scan_status === "scanning") {
+          startPolling(latest.id);
+        } else {
+          stopPolling();
+        }
+        await loadScanData(latest.id);
+      } finally {
+        setHistoryLoading(false);
+      }
+    },
+    [loadScanData, startPolling, stopPolling]
+  );
+
+  useEffect(() => {
+    if (repoFullName && repoFullName !== lastProjectKeyRef.current) {
+      lastProjectKeyRef.current = repoFullName;
+      resetPageState();
+      void loadHistoryForRepo(repoFullName);
+      return;
+    }
+
+    if (!repoFullName) {
+      lastProjectKeyRef.current = null;
+      resetPageState();
+    }
+  }, [loadHistoryForRepo, repoFullName, resetPageState]);
 
   useEffect(() => () => stopPolling(), [stopPolling]);
 
-  const runScan = useCallback(async () => {
-    if (!selectedProject) return;
-    lastRealtimeEventAtRef.current = 0;
-    setScanning(true);
-    setScanMessage("Starting scan...");
-    setScanStep("starting");
-    setScan(null);
-    setReport(null);
-    setCodeFindings([]);
-    setCodeScanStreamEvents([]);
-    setCodeScanActive(false);
-    setCodeScanSummary(null);
-    setAdkTrace(emptyTraceSnapshot());
-    setResultTab("pipeline");
+  const selectHistoryItem = useCallback(
+    async (item: GitHubScanHistoryItem) => {
+      selectedScanIdRef.current = item.id;
+      setSelectedScanId(item.id);
+      setSelectedScan(null);
+      setReport(null);
+      setCodeFindings([]);
+      setAdkTrace(null);
+      setCodeScanStreamEvents([]);
+      setCodeScanActive(false);
+      setScanning(item.scan_status === "scanning");
+      if (item.scan_status === "scanning") {
+        startPolling(item.id);
+      } else {
+        stopPolling();
+      }
+      await loadScanData(item.id);
+    },
+    [loadScanData, startPolling, stopPolling]
+  );
 
-    try {
-      const result = await triggerScan(selectedProject.repo.full_name);
-      setScan(result);
-      scanIdRef.current = result.id;
-      sessionStorage.setItem(scanStorageKey(selectedProject.repo.full_name), String(result.id));
-      void loadAdkTrace(result.id);
-      startPolling(result.id);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Scan failed";
-      setScanMessage(msg);
-      setScanStep("failed");
-      setScanning(false);
-    }
-  }, [loadAdkTrace, selectedProject, startPolling]);
+  const runScan = useCallback(
+    async (scanMode: ScanMode) => {
+      if (!repoFullName) return;
+      lastRealtimeEventAtRef.current = 0;
+      setScanning(true);
+      setScanMessage(
+        scanMode === "fast"
+          ? "Starting Fast Scan..."
+          : "Starting Full Scan..."
+      );
+      setScanStep("starting");
+      setReport(null);
+      setCodeFindings([]);
+      setCodeScanStreamEvents([]);
+      setCodeScanActive(false);
+      setAdkTrace(emptyTraceSnapshot());
+      setResultTab("pipeline");
 
-  useEffect(() => {
-    const key = repoFullName;
-    if (key && key !== lastProjectKeyRef.current) {
-      lastProjectKeyRef.current = key;
-      resetScanState();
-    } else if (!key) {
-      lastProjectKeyRef.current = null;
-      resetScanState();
-    }
-  }, [repoFullName, resetScanState]);
+      try {
+        const created = await triggerScan(repoFullName, scanMode);
+        const historyItem = scanToHistoryItem(created);
+        applyHistoryItem(historyItem);
+        selectedScanIdRef.current = created.id;
+        setSelectedScanId(created.id);
+        setSelectedScan(created);
+        setScanning(true);
+        startPolling(created.id);
+        await loadScanData(created.id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Scan failed";
+        setScanning(false);
+        setScanStep("failed");
+        setScanMessage(message);
+      }
+    },
+    [applyHistoryItem, loadScanData, repoFullName, startPolling]
+  );
 
   const onScanProgress = useCallback((data: { scan_id: number; step: string; message: string }) => {
-    if (scanIdRef.current && data.scan_id === scanIdRef.current) {
+    if (selectedScanIdRef.current === data.scan_id) {
       lastRealtimeEventAtRef.current = Date.now();
       setScanMessage(data.message);
       setScanStep(data.step as ScanProgressStep);
@@ -461,29 +615,23 @@ export default function SupplyChainPage({ selectedProject }: Props) {
 
   const onScanComplete = useCallback(
     async (data: { scan_id: number }) => {
-      if (scanIdRef.current && data.scan_id === scanIdRef.current) {
+      if (selectedScanIdRef.current === data.scan_id) {
         lastRealtimeEventAtRef.current = Date.now();
         stopPolling();
-        await fetchScanResults(data.scan_id);
+        await loadScanData(data.scan_id);
       }
     },
-    [fetchScanResults, stopPolling]
+    [loadScanData, stopPolling]
   );
 
   const onCodeScanStream = useCallback((data: CodeScanStreamEvent) => {
-    if (scanIdRef.current && data.scan_id === scanIdRef.current) {
+    if (selectedScanIdRef.current === data.scan_id) {
       lastRealtimeEventAtRef.current = Date.now();
       if (data.type === "scan_start") {
         setCodeScanActive(true);
         setCodeScanStreamEvents([data]);
-      } else if (data.type === "scan_summary") {
-        setCodeScanSummary(data);
-        setCodeScanStreamEvents((prev) => [...prev, data]);
-        if (data.message) {
-          setScanMessage(data.message);
-        }
       } else {
-        setCodeScanStreamEvents((prev) => [...prev, data]);
+        setCodeScanStreamEvents((previous) => [...previous, data]);
       }
 
       if (data.type === "file_start" && data.file_path) {
@@ -501,9 +649,9 @@ export default function SupplyChainPage({ selectedProject }: Props) {
   }, []);
 
   const onAdkTraceStream = useCallback((data: AdkTraceEvent) => {
-    if (scanIdRef.current && data.scan_id === scanIdRef.current) {
+    if (selectedScanIdRef.current === data.scan_id) {
       lastRealtimeEventAtRef.current = Date.now();
-      setAdkTrace((prev) => mergeTraceEvent(prev, data));
+      setAdkTrace((previous) => mergeTraceEvent(previous, data));
       if (data.kind === "stage_started") {
         if (
           data.phase === "chunk_summary" ||
@@ -525,79 +673,61 @@ export default function SupplyChainPage({ selectedProject }: Props) {
 
   useSocket({ onScanProgress, onScanComplete, onCodeScanStream, onAdkTraceStream });
 
-  const codeAgentRequests = useMemo(() => {
-    if (!adkTrace?.events) return [];
-    const phases = new Set(["chunk_summary", "candidate_generation", "evidence_expansion", "verification", "repo_synthesis"]);
-    return adkTrace.events.filter(e => phases.has(e.phase) && e.kind === "llm_completed");
-  }, [adkTrace]);
+  const activeScan = selectedScan;
+  const selectedHistoryItem = useMemo(
+    () => scanHistory.find((item) => item.id === selectedScanId) || null,
+    [scanHistory, selectedScanId]
+  );
 
-  // Derive token/activity state for AgentActivityPanel from existing data
-  const panelTokens = useMemo(() => {
-    // Use latest token_update or scan_summary event from code scan stream
-    for (let i = codeScanStreamEvents.length - 1; i >= 0; i--) {
-      const evt = codeScanStreamEvents[i];
-      if (evt.type === "scan_summary" || evt.type === "token_update") {
-        return {
-          input: evt.input_tokens ?? 0,
-          output: evt.output_tokens ?? 0,
-          total: evt.total_tokens ?? 0,
-        };
-      }
-    }
-    return { input: 0, output: 0, total: 0 };
-  }, [codeScanStreamEvents]);
-
-  const panelFilesInfo = useMemo(() => {
-    let filesScanned = 0;
-    let totalFiles = 0;
-    for (let i = codeScanStreamEvents.length - 1; i >= 0; i--) {
-      const evt = codeScanStreamEvents[i];
-      if (evt.files_scanned != null) {
-        filesScanned = evt.files_scanned;
-        totalFiles = evt.total_files ?? totalFiles;
-        break;
-      }
-      if (evt.type === "scan_start" && evt.total_files != null) {
-        totalFiles = evt.total_files;
-      }
-    }
-    return { filesScanned, totalFiles };
-  }, [codeScanStreamEvents]);
-
-  const panelActivity = useMemo(() => {
-    // Prefer latest ADK trace event label for richer context
-    if (adkTrace?.events.length) {
-      const latest = adkTrace.events[adkTrace.events.length - 1];
-      if (latest.label) return latest.label;
-    }
-    // Fall back to the current scan message
-    return scanMessage || "Waiting for agent activity...";
-  }, [adkTrace, scanMessage]);
-
-  const panelWarning = useMemo(() => {
-    for (let i = codeScanStreamEvents.length - 1; i >= 0; i--) {
-      const evt = codeScanStreamEvents[i];
-      if (evt.type === "warning") return evt.message || evt.error || "";
-    }
-    return "";
-  }, [codeScanStreamEvents]);
-
-  const dependencies: Dependency[] = scan?.dependencies || [];
-  const liveCodeFindings = codeFindings.length > 0 ? codeFindings : scan?.code_findings || [];
+  const dependencies: Dependency[] = Array.isArray(activeScan?.dependencies)
+    ? activeScan.dependencies
+    : [];
+  const liveCodeFindings = codeFindings.length > 0
+    ? codeFindings
+    : Array.isArray(activeScan?.code_findings)
+      ? activeScan.code_findings
+      : [];
   const vulnerableDeps = dependencies.filter((dependency) => dependency.is_vulnerable);
   const totalVulns = vulnerableDeps.reduce(
     (sum, dependency) => sum + (dependency.vulnerabilities?.length || 0),
     0
   );
-  const isCompleted = scan?.scan_status === "completed";
-  const hasPipeline = Boolean(adkTrace?.events.length || scanning);
-  const isIdle = Boolean(selectedProject && !scan && !scanning && !hasPipeline);
+  const codeAgentRequests = useMemo(() => {
+    if (!adkTrace?.events) return [];
+    const trackedPhases = new Set([
+      "chunk_summary",
+      "candidate_generation",
+      "evidence_expansion",
+      "verification",
+      "repo_synthesis",
+    ]);
+    return adkTrace.events.filter(
+      (event) => trackedPhases.has(event.phase) && event.kind === "llm_completed"
+    );
+  }, [adkTrace]);
+  const activity = useMemo(
+    () => deriveAgentActivity(adkTrace, activeScan, codeScanStreamEvents),
+    [activeScan, adkTrace, codeScanStreamEvents]
+  );
+  const { vulnerabilityCounts, codeCounts } = useMemo(
+    () => severityCounts(dependencies, liveCodeFindings),
+    [dependencies, liveCodeFindings]
+  );
+
   const scoreColor =
-    (scan?.security_score ?? 0) >= 80
+    (activeScan?.security_score ?? 0) >= 80
       ? "var(--md-safe)"
-      : (scan?.security_score ?? 0) >= 50
+      : (activeScan?.security_score ?? 0) >= 50
         ? "var(--md-warning)"
         : "var(--md-error)";
+  const isIdle =
+    Boolean(selectedProject) &&
+    !historyLoading &&
+    scanHistory.length === 0 &&
+    !activeScan &&
+    !scanning;
+  const hasTrace = Boolean(adkTrace?.events.length);
+  const selectedStatus = statusTone(activeScan?.scan_status || selectedHistoryItem?.scan_status);
 
   if (!selectedProject) {
     return (
@@ -634,7 +764,7 @@ export default function SupplyChainPage({ selectedProject }: Props) {
             No project selected
           </div>
           <div style={{ fontSize: 14 }}>
-            Connect GitHub in <strong>Settings</strong> and select a repository to scan.
+            Connect GitHub in <strong>Settings</strong> and select a repository to inspect.
           </div>
         </div>
       </div>
@@ -643,335 +773,432 @@ export default function SupplyChainPage({ selectedProject }: Props) {
 
   return (
     <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 20 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h2
-              style={{
-                fontSize: 20,
-                fontWeight: 600,
-                color: "var(--md-on-surface)",
-                margin: 0,
-              }}
-            >
-              {selectedProject.repo.name}
-            </h2>
-            {scan?.scan_status && (
-              <span
+      <div
+        className="scan-workbench-grid"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "320px minmax(0, 1fr)",
+          gap: 20,
+          alignItems: "start",
+        }}
+      >
+        <aside className="card" style={{ padding: 18, display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <div style={{ fontSize: 12, color: "var(--md-on-surface-variant)", textTransform: "uppercase", letterSpacing: 0.8, fontWeight: 700 }}>
+              Scan History
+            </div>
+            <div style={{ marginTop: 6, fontSize: 13, color: "var(--md-on-surface-variant)", lineHeight: 1.6 }}>
+              Stored scans for the current repository. Selecting a result does not trigger a new scan.
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {historyLoading ? (
+              <div style={{ padding: 16, fontSize: 13, color: "var(--md-on-surface-variant)" }}>
+                Loading scan history...
+              </div>
+            ) : scanHistory.length === 0 ? (
+              <div
                 style={{
-                  fontSize: 11,
-                  padding: "3px 10px",
-                  borderRadius: 12,
-                  fontWeight: 500,
-                  background:
-                    scan.scan_status === "completed"
-                      ? "rgba(46, 125, 50, 0.1)"
-                      : scan.scan_status === "failed"
-                        ? "rgba(198, 40, 40, 0.1)"
-                        : "rgba(0, 131, 143, 0.1)",
-                  color:
-                    scan.scan_status === "completed"
-                      ? "var(--md-safe)"
-                      : scan.scan_status === "failed"
-                        ? "var(--md-error)"
-                        : "var(--md-primary)",
+                  padding: 16,
+                  borderRadius: 14,
+                  background: "var(--md-surface-container)",
+                  fontSize: 13,
+                  color: "var(--md-on-surface-variant)",
+                  lineHeight: 1.6,
                 }}
               >
-                {scan.scan_status === "completed"
-                  ? "Completed"
-                  : scan.scan_status === "failed"
-                    ? "Failed"
-                    : "Scanning"}
-              </span>
-            )}
-          </div>
-          <div
-            style={{
-              fontSize: 13,
-              color: "var(--md-on-surface-variant)",
-              marginTop: 2,
-              fontFamily: "var(--md-font-mono)",
-            }}
-          >
-            {selectedProject.repo.full_name}
-          </div>
-        </div>
-        <button
-          onClick={() => void runScan()}
-          disabled={scanning}
-          style={{
-            padding: "10px 24px",
-            borderRadius: "var(--md-radius-button)",
-            border: "none",
-            background: scanning ? "var(--md-surface-container-high)" : "var(--md-primary)",
-            color: scanning ? "var(--md-on-surface-variant)" : "var(--md-on-primary)",
-            fontWeight: 600,
-            fontSize: 13,
-            cursor: scanning ? "not-allowed" : "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            transition: "all 0.2s ease",
-          }}
-        >
-          {scanning && (
-            <div
-              style={{
-                width: 14,
-                height: 14,
-                border: "2px solid currentColor",
-                borderTopColor: "transparent",
-                borderRadius: "50%",
-                animation: "spin 0.8s linear infinite",
-              }}
-            />
-          )}
-          {scanning ? "Scanning..." : "Scan"}
-        </button>
-      </div>
-
-      {isCompleted && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-            gap: 12,
-          }}
-        >
-          <StatCard
-            label="Security Score"
-            value={scan?.security_score ?? 0}
-            suffix="/100"
-            detail={`Deps: ${scan?.dependency_score ?? 0} | Code: ${scan?.code_security_score ?? 0}`}
-            color={scoreColor}
-          />
-          <StatCard
-            label="Dependencies"
-            value={scan?.total_deps ?? 0}
-            detail={`${scan?.vulnerable_deps ?? 0} vulnerable`}
-            color={(scan?.vulnerable_deps ?? 0) > 0 ? "var(--md-error)" : "var(--md-safe)"}
-          />
-          <StatCard
-            label="Vulnerabilities"
-            value={totalVulns}
-            color={totalVulns > 0 ? "var(--md-error)" : "var(--md-safe)"}
-          />
-          <StatCard
-            label="Code Issues"
-            value={codeFindings.length}
-            detail={
-              codeFindings.filter((finding) => finding.severity === "critical").length > 0
-                ? `${codeFindings.filter((finding) => finding.severity === "critical").length} critical`
-                : undefined
-            }
-            color={
-              codeFindings.filter(
-                (finding) => finding.severity === "critical" || finding.severity === "high"
-              ).length > 0
-                ? "var(--md-error)"
-                : codeFindings.length > 0
-                  ? "var(--md-warning)"
-                  : "var(--md-safe)"
-            }
-          />
-        </div>
-      )}
-
-      {scanning && <ScanProgress currentStep={scanStep} message={scanMessage} />}
-
-      {scanning && adkTrace && (
-        <AgentActivityPanel
-          adkTrace={adkTrace}
-          tokens={panelTokens}
-          filesScanned={panelFilesInfo.filesScanned}
-          totalFiles={panelFilesInfo.totalFiles}
-          currentActivity={panelActivity}
-          warningMessage={panelWarning || undefined}
-        />
-      )}
-
-      {codeScanActive && <CodeScanLiveView streamEvents={codeScanStreamEvents} agentRequests={codeAgentRequests} />}
-
-      {isIdle && (
-        <div
-          className="card"
-          style={{
-            padding: 24,
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            border: "1px dashed var(--md-outline-variant)",
-            background: "var(--md-surface-container)",
-          }}
-        >
-          <div style={{ fontSize: 16, fontWeight: 600, color: "var(--md-on-surface)" }}>
-            Scan is idle
-          </div>
-          <div style={{ fontSize: 13, color: "var(--md-on-surface-variant)", lineHeight: 1.6 }}>
-            Selecting a repository or opening the Code Scan page will not start a scan automatically.
-            Click the <strong>Scan</strong> button when you want to run one.
-          </div>
-        </div>
-      )}
-
-      {!scanning && scanStep === "failed" && (
-        <div
-          className="card"
-          style={{
-            padding: 20,
-            borderLeft: "4px solid var(--md-error)",
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-          }}
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--md-error)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-            <circle cx="12" cy="12" r="10" />
-            <line x1="15" y1="9" x2="9" y2="15" />
-            <line x1="9" y1="9" x2="15" y2="15" />
-          </svg>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 500, color: "var(--md-error)" }}>
-              Scan failed
-            </div>
-            <div style={{ fontSize: 13, color: "var(--md-on-surface-variant)", marginTop: 2, wordBreak: "break-word" }}>
-              {scan?.error_message || scanMessage || "Something went wrong. Try scanning again."}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {(scan || hasPipeline) && (
-        <>
-          <div
-            style={{
-              display: "flex",
-              gap: 0,
-              borderBottom: "1px solid var(--md-outline-variant)",
-              flexWrap: "wrap",
-            }}
-          >
-            <TabButton
-              active={resultTab === "overview"}
-              onClick={() => setResultTab("overview")}
-              label="Overview"
-              count={dependencies.length}
-            />
-            <TabButton
-              active={resultTab === "vulnerabilities"}
-              onClick={() => setResultTab("vulnerabilities")}
-              label="Vulnerabilities"
-              count={totalVulns}
-              alert={totalVulns > 0}
-            />
-            <TabButton
-              active={resultTab === "code"}
-              onClick={() => setResultTab("code")}
-              label="Code Security"
-              count={liveCodeFindings.length}
-              alert={liveCodeFindings.some(
-                (finding) => finding.severity === "critical" || finding.severity === "high"
-              )}
-            />
-            <TabButton
-              active={resultTab === "pipeline"}
-              onClick={() => setResultTab("pipeline")}
-              label="ADK Pipeline"
-              count={adkTrace?.events.length || 0}
-              alert={adkTrace?.phases.some((phase) => phase.status === "error")}
-            />
-          </div>
-
-          <div style={{ minHeight: 400 }}>
-            {resultTab === "overview" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                {scanning && dependencies.length === 0 && (
-                  <InlineScanNotice message="Dependency inventory is still being collected for the overview." />
-                )}
-                <DependencyTree dependencies={dependencies} />
-                {report && <AiRemediationReport report={report} />}
-                {scanning && !report && (
-                  <InlineScanNotice message="AI remediation report will appear here as soon as dependency analysis finishes." />
-                )}
+                No stored scans for this repository yet. Use <strong>Fast Scan</strong> or <strong>Full Scan</strong> to start one manually.
               </div>
-            )}
-
-            {resultTab === "vulnerabilities" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                {scanning && dependencies.length === 0 && (
-                  <InlineScanNotice message="Vulnerability results are still loading from dependency analysis." />
-                )}
-                <VulnerabilityList dependencies={dependencies} />
-                {report && <AiRemediationReport report={report} />}
-              </div>
-            )}
-
-            {resultTab === "code" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                {scan && (scan.code_scan_total_tokens > 0 || scanning) && (
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 20,
-                      padding: "12px 16px",
-                      background: "var(--md-surface-container)",
-                      borderRadius: "var(--md-radius-button)",
-                      fontSize: 12,
-                      color: "var(--md-on-surface-variant)",
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <span style={{ fontWeight: 500, color: "var(--md-on-surface)" }}>
-                      Scan Metrics
+            ) : (
+              scanHistory.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => void selectHistoryItem(item)}
+                  style={{
+                    border: selectedScanId === item.id ? "1px solid var(--md-primary)" : "1px solid var(--md-outline-variant)",
+                    background:
+                      selectedScanId === item.id
+                        ? "rgba(2, 119, 189, 0.08)"
+                        : "var(--md-surface-container)",
+                    borderRadius: 14,
+                    padding: "14px 14px 12px",
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "var(--md-on-surface)" }}>
+                      {item.scan_mode === "fast" ? "Fast Scan" : "Full Scan"}
                     </span>
-                    <span>
-                      Files:{" "}
-                      <strong style={{ color: "var(--md-on-surface)" }}>
-                        {scan.code_scan_files_scanned}/{scan.code_scan_files_total}
-                      </strong>
-                    </span>
-                    <div style={{ width: 1, height: 16, background: "var(--md-outline-variant)" }} />
-                    <span>
-                      Tokens:{" "}
-                      <strong style={{ color: "var(--md-on-surface)" }}>
-                        {scan.code_scan_input_tokens.toLocaleString()}
-                      </strong>{" "}
-                      in
-                    </span>
-                    <span>
-                      <strong style={{ color: "var(--md-on-surface)" }}>
-                        {scan.code_scan_output_tokens.toLocaleString()}
-                      </strong>{" "}
-                      out
-                    </span>
-                    <span>
-                      <strong style={{ color: "var(--md-primary)" }}>
-                        {scan.code_scan_total_tokens.toLocaleString()}
-                      </strong>{" "}
-                      total
+                    <span
+                      style={{
+                        fontSize: 10,
+                        padding: "3px 8px",
+                        borderRadius: 999,
+                        background: statusTone(item.scan_status).background,
+                        color: statusTone(item.scan_status).color,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {statusTone(item.scan_status).label}
                     </span>
                   </div>
-                )}
-                <AgentRequestLog events={codeAgentRequests} loading={scanning} />
-                {scanning && liveCodeFindings.length === 0 && (
-                  <InlineScanNotice message="Code findings will stream in here while verification completes." />
-                )}
-                <CodeSecurityFindings findings={liveCodeFindings} />
+                  <div style={{ marginTop: 8, fontSize: 11, color: "var(--md-on-surface-variant)" }}>
+                    {formatTime(item.scanned_at)}
+                  </div>
+                  <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+                    <HistoryMetric label="Score" value={String(item.security_score ?? 0)} />
+                    <HistoryMetric label="Vuln Deps" value={String(item.vulnerable_deps ?? 0)} />
+                    <HistoryMetric label="Code" value={String(item.code_findings_count ?? 0)} />
+                  </div>
+                  {item.error_message && (
+                    <div style={{ marginTop: 10, fontSize: 11, color: "var(--md-error)", lineHeight: 1.5 }}>
+                      {item.error_message}
+                    </div>
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+        </aside>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <div className="card" style={{ padding: 20, display: "flex", flexDirection: "column", gap: 18 }}>
+            <div style={{ display: "flex", alignItems: "start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <h2 style={{ fontSize: 22, fontWeight: 700, color: "var(--md-on-surface)", margin: 0 }}>
+                    {selectedProject.repo.name}
+                  </h2>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      fontWeight: 700,
+                      background: selectedStatus.background,
+                      color: selectedStatus.color,
+                    }}
+                  >
+                    {selectedStatus.label}
+                  </span>
+                  {(activeScan?.scan_mode || selectedHistoryItem?.scan_mode) && (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        padding: "4px 10px",
+                        borderRadius: 999,
+                        fontWeight: 700,
+                        background: "var(--md-surface-container-high)",
+                        color: "var(--md-on-surface)",
+                      }}
+                    >
+                      {(activeScan?.scan_mode || selectedHistoryItem?.scan_mode) === "fast" ? "Fast Scan" : "Full Scan"}
+                    </span>
+                  )}
+                  <span
+                    style={{
+                      fontSize: 11,
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      fontWeight: 600,
+                      background: "var(--md-surface-container-high)",
+                      color: "var(--md-on-surface-variant)",
+                    }}
+                  >
+                    {(activeScan?.scan_status || selectedHistoryItem?.scan_status) === "scanning" ? "Live scan" : "Stored result"}
+                  </span>
+                </div>
+                <div style={{ marginTop: 6, fontSize: 13, color: "var(--md-on-surface-variant)", fontFamily: "var(--md-font-mono)" }}>
+                  {selectedProject.repo.full_name}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button
+                  onClick={() => void runScan("fast")}
+                  disabled={scanning}
+                  style={{
+                    ...buttonStyle,
+                    background: scanning ? "var(--md-surface-container-high)" : "var(--md-primary)",
+                    color: scanning ? "var(--md-on-surface-variant)" : "var(--md-on-primary)",
+                  }}
+                >
+                  {scanning && <Spinner />}
+                  {scanning ? "Scanning..." : "Fast Scan"}
+                </button>
+                <button
+                  onClick={() => void runScan("full")}
+                  disabled={scanning}
+                  style={{
+                    ...buttonStyle,
+                    background: "var(--md-surface-container)",
+                    color: scanning ? "var(--md-on-surface-variant)" : "var(--md-on-surface)",
+                    border: "1px solid var(--md-outline-variant)",
+                  }}
+                >
+                  Full Scan
+                </button>
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+                gap: 12,
+              }}
+            >
+              <SnapshotMetric label="Started" value={formatTime(activeScan?.started_at || selectedHistoryItem?.started_at || activeScan?.scanned_at || selectedHistoryItem?.scanned_at)} />
+              <SnapshotMetric label="Completed" value={formatTime(activeScan?.completed_at || selectedHistoryItem?.completed_at)} />
+              <SnapshotMetric label="Duration" value={formatDuration(activeScan?.duration_ms || selectedHistoryItem?.duration_ms)} />
+              <SnapshotMetric label="Security Score" value={`${activeScan?.security_score ?? selectedHistoryItem?.security_score ?? 0}/100`} tone={scoreColor} />
+            </div>
+
+            {activeScan && (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                  gap: 12,
+                }}
+              >
+                <StatCard
+                  label="Dependencies"
+                  value={activeScan.total_deps}
+                  detail={`${activeScan.vulnerable_deps} vulnerable`}
+                  color={activeScan.vulnerable_deps > 0 ? "var(--md-error)" : "var(--md-safe)"}
+                />
+                <StatCard
+                  label="Vulnerabilities"
+                  value={totalVulns}
+                  detail={`Critical ${vulnerabilityCounts.critical} · High ${vulnerabilityCounts.high}`}
+                  color={totalVulns > 0 ? "var(--md-error)" : "var(--md-safe)"}
+                />
+                <StatCard
+                  label="Code Findings"
+                  value={liveCodeFindings.length}
+                  detail={`Critical ${codeCounts.critical} · High ${codeCounts.high}`}
+                  color={(codeCounts.critical + codeCounts.high) > 0 ? "var(--md-error)" : liveCodeFindings.length > 0 ? "var(--md-warning)" : "var(--md-safe)"}
+                />
+                <StatCard
+                  label="Execution"
+                  value={hasTrace ? adkTrace?.events.length || 0 : 0}
+                  detail={activity.phase_label}
+                  color="var(--md-primary)"
+                />
               </div>
             )}
 
-            {resultTab === "pipeline" && (
-              <AdkPipelineView
-                snapshot={adkTrace}
-                loading={adkTraceLoading || scanning}
-                scan={scan}
-                codeScanStreamEvents={codeScanStreamEvents}
-              />
+            {activeScan?.error_message && (
+              <div
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: 12,
+                  background: "rgba(198, 40, 40, 0.08)",
+                  color: "var(--md-error)",
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                }}
+              >
+                {activeScan.error_message}
+              </div>
             )}
           </div>
-        </>
-      )}
+
+          {scanning && <ScanProgress currentStep={scanStep} message={scanMessage} />}
+
+          {adkTrace && (scanning || adkTrace.events.length > 0) && (
+            <AgentActivityPanel adkTrace={adkTrace} activity={activity} />
+          )}
+
+          {codeScanActive && scanning && (
+            <CodeScanLiveView
+              streamEvents={codeScanStreamEvents}
+              agentRequests={codeAgentRequests}
+            />
+          )}
+
+          {isIdle && (
+            <div
+              className="card"
+              style={{
+                padding: 24,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                border: "1px dashed var(--md-outline-variant)",
+                background: "var(--md-surface-container)",
+              }}
+            >
+              <div style={{ fontSize: 16, fontWeight: 700, color: "var(--md-on-surface)" }}>
+                Scan is idle
+              </div>
+              <div style={{ fontSize: 13, color: "var(--md-on-surface-variant)", lineHeight: 1.6 }}>
+                Opening this page or switching repositories only loads stored history. Start a new scan manually with <strong>Fast Scan</strong> or <strong>Full Scan</strong>.
+              </div>
+            </div>
+          )}
+
+          {(activeScan || historyLoading || detailLoading || hasTrace) && (
+            <>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 0,
+                  borderBottom: "1px solid var(--md-outline-variant)",
+                  flexWrap: "wrap",
+                }}
+              >
+                <TabButton active={resultTab === "overview"} onClick={() => setResultTab("overview")} label="Overview" />
+                <TabButton active={resultTab === "dependencies"} onClick={() => setResultTab("dependencies")} label="Dependencies" count={dependencies.length} />
+                <TabButton active={resultTab === "vulnerabilities"} onClick={() => setResultTab("vulnerabilities")} label="Vulnerabilities" count={totalVulns} alert={totalVulns > 0} />
+                <TabButton active={resultTab === "code"} onClick={() => setResultTab("code")} label="Code Security" count={liveCodeFindings.length} alert={liveCodeFindings.some((finding) => finding.severity === "critical" || finding.severity === "high")} />
+                <TabButton active={resultTab === "pipeline"} onClick={() => setResultTab("pipeline")} label="ADK Pipeline" count={adkTrace?.events.length || 0} alert={adkTrace?.phases.some((phase) => phase.status === "error")} />
+              </div>
+
+              <div style={{ minHeight: 420 }}>
+                {detailLoading && !activeScan ? (
+                  <div className="card" style={{ padding: 18, color: "var(--md-on-surface-variant)", fontSize: 13 }}>
+                    Loading scan details...
+                  </div>
+                ) : resultTab === "overview" ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                    {!activeScan && <InlineScanNotice message="Select a stored scan to inspect the analyst summary." />}
+                    {activeScan && (
+                      <>
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                            gap: 12,
+                          }}
+                        >
+                          <SnapshotMetric label="Dependency Severity" value={`C ${vulnerabilityCounts.critical} · H ${vulnerabilityCounts.high} · M ${vulnerabilityCounts.medium} · L ${vulnerabilityCounts.low}`} />
+                          <SnapshotMetric label="Code Severity" value={`C ${codeCounts.critical} · H ${codeCounts.high} · M ${codeCounts.medium} · L ${codeCounts.low}`} />
+                          <SnapshotMetric label="Vulnerable Dependencies" value={`${activeScan.vulnerable_deps}/${activeScan.total_deps}`} />
+                          <SnapshotMetric label="Code Findings" value={`${liveCodeFindings.length}`} />
+                        </div>
+                        <DependencyTree dependencies={dependencies} />
+                        {report ? (
+                          <AiRemediationReport report={report} />
+                        ) : (
+                          <InlineScanNotice message="AI remediation summary is not available for this scan yet." />
+                        )}
+                      </>
+                    )}
+                  </div>
+                ) : resultTab === "dependencies" ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                    {activeScan ? (
+                      <>
+                        <DependencyInventory dependencies={dependencies} />
+                        <DependencyTree dependencies={dependencies} />
+                      </>
+                    ) : (
+                      <InlineScanNotice message="No dependency inventory is available for the selected scan." />
+                    )}
+                  </div>
+                ) : resultTab === "vulnerabilities" ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                    {activeScan ? (
+                      <>
+                        <VulnerabilityList dependencies={dependencies} />
+                        {report && <AiRemediationReport report={report} />}
+                      </>
+                    ) : (
+                      <InlineScanNotice message="No vulnerability results are available for the selected scan." />
+                    )}
+                  </div>
+                ) : resultTab === "code" ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                    <AgentRequestLog events={codeAgentRequests} loading={scanning} />
+                    {scanning && liveCodeFindings.length === 0 && (
+                      <InlineScanNotice message="Code findings will appear here as verification completes." />
+                    )}
+                    <CodeSecurityFindings findings={liveCodeFindings} />
+                  </div>
+                ) : (
+                  <AdkPipelineView
+                    snapshot={adkTrace}
+                    loading={adkTraceLoading || scanning}
+                    scan={activeScan}
+                    codeScanStreamEvents={codeScanStreamEvents}
+                  />
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      <style>{`
+        @media (max-width: 1100px) {
+          .scan-workbench-grid {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function HistoryMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      style={{
+        padding: "8px 10px",
+        borderRadius: 10,
+        background: "var(--md-surface-container-high)",
+      }}
+    >
+      <div style={{ fontSize: 10, color: "var(--md-on-surface-variant)" }}>{label}</div>
+      <div
+        style={{
+          marginTop: 3,
+          fontSize: 13,
+          fontWeight: 700,
+          color: "var(--md-on-surface)",
+          fontFamily: "var(--md-font-mono)",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function SnapshotMetric({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: string;
+}) {
+  return (
+    <div
+      style={{
+        padding: "12px 14px",
+        borderRadius: 12,
+        background: "var(--md-surface-container)",
+      }}
+    >
+      <div style={{ fontSize: 11, color: "var(--md-on-surface-variant)" }}>{label}</div>
+      <div
+        style={{
+          marginTop: 4,
+          fontSize: 14,
+          fontWeight: 700,
+          color: tone || "var(--md-on-surface)",
+          wordBreak: "break-word",
+        }}
+      >
+        {value}
+      </div>
     </div>
   );
 }
@@ -1059,7 +1286,7 @@ function TabButton({
         borderBottom: active ? "2px solid var(--md-primary)" : "2px solid transparent",
         background: "transparent",
         color: active ? "var(--md-primary)" : "var(--md-on-surface-variant)",
-        fontWeight: active ? 600 : 400,
+        fontWeight: active ? 700 : 500,
         fontSize: 14,
         cursor: "pointer",
         display: "flex",
@@ -1076,7 +1303,7 @@ function TabButton({
             fontSize: 11,
             padding: "2px 7px",
             borderRadius: 10,
-            fontWeight: 600,
+            fontWeight: 700,
             background: alert
               ? "var(--md-error)"
               : active
@@ -1091,3 +1318,30 @@ function TabButton({
     </button>
   );
 }
+
+function Spinner() {
+  return (
+    <div
+      style={{
+        width: 14,
+        height: 14,
+        border: "2px solid currentColor",
+        borderTopColor: "transparent",
+        borderRadius: "50%",
+        animation: "spin 0.8s linear infinite",
+      }}
+    />
+  );
+}
+
+const buttonStyle: CSSProperties = {
+  padding: "10px 18px",
+  borderRadius: 999,
+  fontWeight: 700,
+  fontSize: 13,
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  border: "none",
+};

@@ -29,13 +29,22 @@ interface SocketEvents {
   onGcpTimeseriesUpdate?: (data: GcpThreatTimeseriesPoint[]) => void;
 }
 
-export function useSocket(events: SocketEvents = {}, remoteUrl?: string | null) {
+export function useSocket(
+  events: SocketEvents = {},
+  remoteUrl?: string | null,
+  enabled = true
+) {
   const [connected, setConnected] = useState(false);
   const socketRef = useRef<Socket | null>(null);
   const eventsRef = useRef(events);
   eventsRef.current = events;
 
   useEffect(() => {
+    if (!enabled) {
+      setConnected(false);
+      return;
+    }
+
     const isRemote = !!remoteUrl;
     const socket = isRemote
       ? io(remoteUrl, {
@@ -106,7 +115,7 @@ export function useSocket(events: SocketEvents = {}, remoteUrl?: string | null) 
     return () => {
       socket.disconnect();
     };
-  }, [remoteUrl]);
+  }, [enabled, remoteUrl]);
 
   const emit = useCallback((event: string, data: unknown) => {
     socketRef.current?.emit(event, data);

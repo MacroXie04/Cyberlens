@@ -17,8 +17,11 @@ urlpatterns = [
     path("gcp-estate/summary/", views.gcp_estate_summary, name="gcp-estate-summary"),
     path("gcp-estate/services/", views.gcp_estate_services, name="gcp-estate-services"),
     path("gcp-estate/timeseries/", views.gcp_estate_timeseries, name="gcp-estate-timeseries"),
+    path("gcp-estate/timeline/", views.gcp_estate_timeline, name="gcp-estate-timeline"),
+    path("gcp-estate/replay-snapshot/", views.gcp_estate_replay_snapshot, name="gcp-estate-replay-snapshot"),
     path("gcp-estate/refresh/", views.gcp_trigger_refresh, name="gcp-estate-refresh"),
     path("gcp-estate/ensure-collection/", views.gcp_ensure_collection, name="gcp-ensure-collection"),
+    path("gcp-estate/ensure-history/", views.gcp_ensure_history, name="gcp-ensure-history"),
     # GCP Security
     path("gcp-security/events/", views.gcp_security_events, name="gcp-security-events"),
     path("gcp-security/incidents/", views.gcp_security_incidents, name="gcp-security-incidents"),
