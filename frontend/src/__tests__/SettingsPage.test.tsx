@@ -15,10 +15,6 @@ vi.mock("../components/SupplyChain/GitHubConnect", () => ({
   default: () => <div data-testid="github-connect">GitHubConnect</div>,
 }));
 
-vi.mock("../components/Settings/CloudRunConnect", () => ({
-  default: () => <div data-testid="cloud-run-connect">CloudRunConnect</div>,
-}));
-
 vi.mock("../components/Settings/GcpLoggingConfig", () => ({
   default: () => <div data-testid="gcp-logging">GcpLoggingConfig</div>,
 }));
@@ -42,9 +38,6 @@ function renderSettings(props: Partial<Parameters<typeof SettingsPage>[0]> = {})
     onAdkKeyChange: vi.fn(),
     geminiModel: "",
     onModelChange: vi.fn(),
-    cloudRunUrl: null,
-    onCloudRunConnect: vi.fn(),
-    onCloudRunDisconnect: vi.fn(),
   };
   return render(
     <MemoryRouter>
@@ -70,6 +63,12 @@ describe("SettingsPage", () => {
     renderSettings();
 
     expect(screen.getByText("Google Agent Development Kit (ADK)")).toBeInTheDocument();
+  });
+
+  it("does not render the Cloud Run instance card", () => {
+    renderSettings();
+
+    expect(screen.queryByText("Cloud Run Instance")).not.toBeInTheDocument();
   });
 
   it("shows 'Not configured' when API key not set", () => {
@@ -236,11 +235,6 @@ describe("SettingsPage model selector", () => {
 });
 
 describe("SettingsPage sub-components", () => {
-  it("renders CloudRunConnect component", () => {
-    renderSettings();
-    expect(screen.getByTestId("cloud-run-connect")).toBeInTheDocument();
-  });
-
   it("renders GcpLoggingConfig component", () => {
     renderSettings();
     expect(screen.getByTestId("gcp-logging")).toBeInTheDocument();

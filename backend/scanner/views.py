@@ -1,3 +1,4 @@
+import logging
 import os
 
 import requests as http_requests
@@ -14,8 +15,11 @@ from .serializers import (
     GitHubScanListSerializer,
     GitHubScanSerializer,
 )
+from .services.adk_trace import build_trace_snapshot
 from .services.github_client import list_repos, validate_token
-from .services.osv_scanner import run_full_scan
+from .services.osv_scanner import run_full_scan, run_local_scan
+
+logger = logging.getLogger(__name__)
 
 
 def _get_user_settings(request):
@@ -24,6 +28,16 @@ def _get_user_settings(request):
 
     settings_obj, _ = UserSettings.objects.get_or_create(user=request.user)
     return settings_obj
+
+
+def _dispatch_background_task(task, *args, **kwargs):
+    try:
+        task.delay(*args, **kwargs)
+    except Exception:
+        logger.exception(
+            "Background task dispatch failed for %s; running inline", task.name
+        )
+        task.apply(args=args, kwargs=kwargs)
 
 
 @api_view(["GET"])
@@ -122,8 +136,8 @@ def scan(request):
         scan_status="scanning",
     )
 
-    run_full_scan.delay(
-        github_scan.id, pat, repo_full_name, user_id=request.user.id
+    _dispatch_background_task(
+        run_full_scan, github_scan.id, pat, repo_full_name, user_id=request.user.id
     )
 
     return Response(
@@ -174,6 +188,17 @@ def code_findings(request, scan_id):
         )
     findings = github_scan.code_findings.all()
     return Response(CodeFindingSerializer(findings, many=True).data)
+
+
+@api_view(["GET"])
+def adk_trace(request, scan_id):
+    try:
+        github_scan = GitHubScan.objects.get(id=scan_id, user=request.user)
+    except GitHubScan.DoesNotExist:
+        return Response(
+            {"error": "Scan not found"}, status=status.HTTP_404_NOT_FOUND
+        )
+    return Response(build_trace_snapshot(github_scan))
 
 
 @api_view(["GET", "PUT"])
@@ -231,6 +256,8 @@ def settings_view(request):
 @api_view(["POST"])
 def test_api_key(request):
     """Test the configured Google API key by making a lightweight Gemini call."""
+    from cyberlens.utils import probe_gemini_api_connection
+
     user_settings = _get_user_settings(request)
     key = user_settings.google_api_key
     if not key:
@@ -243,33 +270,23 @@ def test_api_key(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    try:
-        resp = http_requests.get(
-            f"https://generativelanguage.googleapis.com/v1beta/models?key={key}",
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            models = resp.json().get("models", [])
-            model_names = [m.get("name", "") for m in models[:5]]
-            return Response({"success": True, "models": model_names})
-        elif resp.status_code in (400, 403):
-            return Response(
-                {"success": False, "error": "Invalid API key"},
-                status=status.HTTP_200_OK,
+    probe = probe_gemini_api_connection(key)
+    if probe["success"]:
+        try:
+            resp = http_requests.get(
+                f"https://generativelanguage.googleapis.com/v1beta/models?key={key}",
+                timeout=10,
             )
-        else:
-            return Response(
-                {
-                    "success": False,
-                    "error": f"API returned status {resp.status_code}",
-                },
-                status=status.HTTP_200_OK,
-            )
-    except http_requests.RequestException as e:
-        return Response(
-            {"success": False, "error": f"Connection failed: {str(e)}"},
-            status=status.HTTP_200_OK,
-        )
+            models = resp.json().get("models", []) if resp.status_code == 200 else []
+        except http_requests.RequestException:
+            models = []
+        model_names = [m.get("name", "") for m in models[:5]]
+        return Response({"success": True, "models": model_names})
+
+    return Response(
+        {"success": False, "error": probe["message"], "error_type": probe["error_type"]},
+        status=status.HTTP_200_OK,
+    )
 
 
 @api_view(["GET"])
@@ -314,13 +331,19 @@ def gcp_settings_view(request):
     """Get or update GCP Cloud Logging settings."""
     user_settings = _get_user_settings(request)
 
+    def _serialize_gcp(s):
+        return {
+            "gcp_project_id": s.gcp_project_id,
+            "gcp_service_name": s.gcp_service_name,
+            "gcp_region": s.gcp_region,
+            "gcp_service_account_key_set": bool(s.gcp_service_account_key),
+            "gcp_regions": s.gcp_regions or [],
+            "gcp_service_filters": s.gcp_service_filters or [],
+            "gcp_enabled_sources": s.gcp_enabled_sources or [],
+        }
+
     if request.method == "GET":
-        return Response({
-            "gcp_project_id": user_settings.gcp_project_id,
-            "gcp_service_name": user_settings.gcp_service_name,
-            "gcp_region": user_settings.gcp_region,
-            "gcp_service_account_key_set": bool(user_settings.gcp_service_account_key),
-        })
+        return Response(_serialize_gcp(user_settings))
 
     # PUT
     update_fields = []
@@ -335,6 +358,12 @@ def gcp_settings_view(request):
         user_settings.gcp_service_account_key = key_json.strip()
         update_fields.append("gcp_service_account_key")
 
+    for json_field in ("gcp_regions", "gcp_service_filters", "gcp_enabled_sources"):
+        value = request.data.get(json_field)
+        if value is not None:
+            setattr(user_settings, json_field, value)
+            update_fields.append(json_field)
+
     if not update_fields:
         return Response(
             {"error": "No fields provided"},
@@ -342,12 +371,7 @@ def gcp_settings_view(request):
         )
 
     user_settings.save(update_fields=update_fields)
-    return Response({
-        "gcp_project_id": user_settings.gcp_project_id,
-        "gcp_service_name": user_settings.gcp_service_name,
-        "gcp_region": user_settings.gcp_region,
-        "gcp_service_account_key_set": bool(user_settings.gcp_service_account_key),
-    })
+    return Response(_serialize_gcp(user_settings))
 
 
 @api_view(["GET"])
@@ -366,7 +390,7 @@ def local_projects(request):
 def local_scan(request):
     """Trigger a dependency + code security scan on a local directory."""
     from .services.local_client import validate_local_path as _vlp  # noqa: E402
-    from .services.osv_scanner import run_local_scan as _rls  # noqa: E402
+
     dir_path = request.data.get("path", "")
     if not dir_path:
         return Response(
@@ -384,7 +408,9 @@ def local_scan(request):
         scan_source="local",
         scan_status="scanning",
     )
-    _rls.delay(github_scan.id, dir_path, user_id=request.user.id)
+    _dispatch_background_task(
+        run_local_scan, github_scan.id, dir_path, user_id=request.user.id
+    )
     return Response(
         GitHubScanListSerializer(github_scan).data,
         status=status.HTTP_202_ACCEPTED,

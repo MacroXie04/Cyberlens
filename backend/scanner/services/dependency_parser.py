@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 def parse_dependencies(filename: str, content: str) -> list[dict]:
     """Parse a dependency manifest file and return a list of {name, version, ecosystem}."""
+    manifest_name = filename.replace("\\", "/").rsplit("/", 1)[-1]
     parsers = {
         "package.json": _parse_package_json,
         "package-lock.json": _parse_package_lock,
@@ -16,7 +17,7 @@ def parse_dependencies(filename: str, content: str) -> list[dict]:
         "Gemfile": _parse_gemfile,
     }
 
-    parser = parsers.get(filename)
+    parser = parsers.get(manifest_name)
     if parser is None:
         logger.warning("No parser for %s", filename)
         return []

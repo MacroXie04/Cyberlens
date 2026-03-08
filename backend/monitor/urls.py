@@ -13,4 +13,15 @@ urlpatterns = [
     path("stats/geo/", views.stats_geo, name="stats-geo"),
     path("verify-session/", views.verify_session, name="verify-session"),
     path("cloud-run-logs/", views.cloud_run_logs, name="cloud-run-logs"),
+    # GCP Estate
+    path("gcp-estate/summary/", views.gcp_estate_summary, name="gcp-estate-summary"),
+    path("gcp-estate/services/", views.gcp_estate_services, name="gcp-estate-services"),
+    path("gcp-estate/timeseries/", views.gcp_estate_timeseries, name="gcp-estate-timeseries"),
+    path("gcp-estate/refresh/", views.gcp_trigger_refresh, name="gcp-estate-refresh"),
+    # GCP Security
+    path("gcp-security/events/", views.gcp_security_events, name="gcp-security-events"),
+    path("gcp-security/incidents/", views.gcp_security_incidents, name="gcp-security-incidents"),
+    path("gcp-security/incidents/<int:incident_id>/", views.gcp_security_incident_detail, name="gcp-security-incident-detail"),
+    path("gcp-security/incidents/<int:incident_id>/ack/", views.gcp_security_incident_ack, name="gcp-security-incident-ack"),
+    path("gcp-security/map/", views.gcp_security_map, name="gcp-security-map"),
 ]

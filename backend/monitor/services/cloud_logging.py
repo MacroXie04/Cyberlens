@@ -45,25 +45,20 @@ def fetch_cloud_run_logs(
 
     filter_str = " AND ".join(parts)
 
-    entries = client.list_entries(
+    entries_iter = client.list_entries(
         filter_=filter_str,
         max_results=max_entries,
         order_by=logging_v2.DESCENDING,
         page_token=page_token,
     )
 
-    results = []
-    next_token = None
-    page = entries.pages
-    try:
-        first_page = next(page)
-        for entry in first_page:
-            results.append(_entry_to_dict(entry))
-        next_token = entries.next_page_token
-    except StopIteration:
-        pass
+    results = [_entry_to_dict(entry) for entry in entries_iter]
+    next_token = getattr(entries_iter, "next_page_token", None)
 
-    return {"entries": results, "next_page_token": next_token}
+    response = {"entries": results}
+    if next_token:
+        response["next_page_token"] = next_token
+    return response
 
 
 def _entry_to_dict(entry) -> dict:

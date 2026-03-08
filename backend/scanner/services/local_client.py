@@ -18,7 +18,8 @@ MANIFEST_FILES = [
 
 SOURCE_EXTENSIONS = {
     ".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rb", ".java",
-    ".php", ".html", ".sql", ".yml", ".yaml", ".toml",
+    ".php", ".html", ".sql", ".yml", ".yaml", ".toml", ".swift",
+    ".m", ".mm", ".h", ".c", ".cc", ".cpp", ".kt", ".kts",
 }
 
 SKIP_DIRS = {
@@ -83,15 +84,19 @@ def list_local_projects(base_path: str = "") -> list[dict]:
 
 
 def get_local_dependency_files(dir_path: str) -> dict[str, str]:
-    """Read dependency manifest files from a local directory."""
+    """Read dependency manifest files from a local directory tree."""
     target = validate_local_path(dir_path)
     found = {}
-    for filename in MANIFEST_FILES:
-        filepath = target / filename
-        if filepath.is_file():
+    for root, dirs, filenames in os.walk(target):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")]
+        for filename in filenames:
+            if filename not in MANIFEST_FILES:
+                continue
+            filepath = Path(root) / filename
             try:
                 content = filepath.read_text(encoding="utf-8")
-                found[filename] = content
+                rel_path = str(filepath.relative_to(target))
+                found[rel_path] = content
             except (OSError, UnicodeDecodeError):
                 logger.warning("Could not read %s", filepath)
     return found

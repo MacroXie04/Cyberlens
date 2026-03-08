@@ -176,6 +176,12 @@ class TestParseDispatch:
         assert len(result) == 1
         assert result[0]["ecosystem"] == "npm"
 
+    def test_dispatches_nested_manifest_paths(self):
+        content = json.dumps({"dependencies": {"react": "^18.0.0"}})
+        result = parse_dependencies("pages/package.json", content)
+        assert len(result) == 1
+        assert result[0]["name"] == "react"
+
     def test_unknown_file_returns_empty(self):
         result = parse_dependencies("Cargo.toml", "some content")
         assert result == []

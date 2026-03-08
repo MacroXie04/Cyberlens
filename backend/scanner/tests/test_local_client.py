@@ -88,6 +88,16 @@ class TestGetLocalDependencyFiles:
         assert "package.json" not in result
         assert "requirements.txt" in result
 
+    def test_reads_nested_manifests_recursively(self, scan_root):
+        proj = scan_root / "myproject"
+        nested = proj / "pages"
+        nested.mkdir(parents=True)
+        (nested / "package.json").write_text('{"dependencies":{"react":"^18.0.0"}}')
+
+        result = get_local_dependency_files("myproject")
+
+        assert "pages/package.json" in result
+
     def test_traversal_raises(self, scan_root):
         with pytest.raises(ValueError, match="Path traversal"):
             get_local_dependency_files("../../etc")

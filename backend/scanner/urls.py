@@ -10,6 +10,7 @@ urlpatterns = [
     path("scan/<int:scan_id>/", views.scan_detail, name="github-scan-detail"),
     path("scan/<int:scan_id>/ai-report/", views.ai_report, name="github-ai-report"),
     path("scan/<int:scan_id>/code-findings/", views.code_findings, name="code-findings"),
+    path("scan/<int:scan_id>/adk-trace/", views.adk_trace, name="adk-trace"),
     path("local/projects/", views.local_projects, name="local-projects"),
     path("local/scan/", views.local_scan, name="local-scan"),
 ]

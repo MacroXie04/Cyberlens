@@ -79,13 +79,9 @@ This starts these containers:
 - postgres: `localhost:5432`
 - redis: `localhost:6379`
 
-### 3. Run database migrations
+### 3. Start using the app
 
-In a second terminal:
-
-```bash
-docker compose exec backend python manage.py migrate
-```
+The backend now runs `python manage.py migrate --noinput` automatically during container startup, so a fresh `docker compose up --build` creates the built-in Django tables, including `django_session`, before the API begins serving requests.
 
 ### 4. Create a user session for the app
 

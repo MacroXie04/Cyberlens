@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { updateSettings, testApiKey, getRepos, getAvailableModels } from "../services/api";
 import type { GitHubUser, GitHubRepo, SelectedProject } from "../types";
 import GitHubConnect from "../components/SupplyChain/GitHubConnect";
-import CloudRunConnect from "../components/Settings/CloudRunConnect";
 import GcpLoggingConfig from "../components/Settings/GcpLoggingConfig";
 
 interface Props {
@@ -16,9 +15,6 @@ interface Props {
   onAdkKeyChange: (keySet: boolean, preview: string) => void;
   geminiModel: string;
   onModelChange: (model: string) => void;
-  cloudRunUrl: string | null;
-  onCloudRunConnect: (url: string) => void;
-  onCloudRunDisconnect: () => void;
 }
 
 export default function SettingsPage({
@@ -32,9 +28,6 @@ export default function SettingsPage({
   onAdkKeyChange,
   geminiModel,
   onModelChange,
-  cloudRunUrl,
-  onCloudRunConnect,
-  onCloudRunDisconnect,
 }: Props) {
   const [inputKey, setInputKey] = useState("");
   const [saving, setSaving] = useState(false);
@@ -139,36 +132,6 @@ export default function SettingsPage({
       >
         Settings
       </h2>
-
-      {/* Cloud Run Instance */}
-      <div className="card">
-        <h3
-          style={{
-            fontSize: 16,
-            fontWeight: 500,
-            color: "var(--md-on-surface)",
-            marginBottom: 4,
-          }}
-        >
-          Cloud Run Instance
-        </h3>
-        <p
-          style={{
-            fontSize: 13,
-            color: "var(--md-on-surface-variant)",
-            marginBottom: 16,
-          }}
-        >
-          Connect to a remote CyberLens instance on Google Cloud Run for live
-          monitoring data.
-        </p>
-        <CloudRunConnect
-          cloudRunUrl={cloudRunUrl}
-          onConnect={onCloudRunConnect}
-          onDisconnect={onCloudRunDisconnect}
-        />
-      </div>
-
       {/* GCP Cloud Logging */}
       <div className="card">
         <h3

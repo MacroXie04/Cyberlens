@@ -44,6 +44,68 @@ describe("fetchJson / CSRF handling", () => {
     expect(init.credentials).toBe("same-origin");
   });
 
+  it("bootstraps a CSRF cookie before unsafe local requests when missing", async () => {
+    Object.defineProperty(document, "cookie", {
+      writable: true,
+      value: "",
+    });
+
+    mockFetch.mockImplementationOnce(async (url) => {
+      expect(url).toBe("/api/auth/me/");
+      document.cookie = "csrftoken=bootstrapped-token";
+      return jsonResponse({ authenticated: false });
+    });
+    mockFetch.mockImplementationOnce(async (url, init) => {
+      expect(url).toBe("/api/settings/");
+      expect(init?.headers["X-CSRFToken"]).toBe("bootstrapped-token");
+      return jsonResponse({
+        google_api_key_set: true,
+        google_api_key_preview: "AIza...1234",
+        gemini_model: "",
+      });
+    });
+
+    await api.updateSettings({ google_api_key: "AIzaSyBootstrapped" });
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes the CSRF cookie and retries once after a 403", async () => {
+    Object.defineProperty(document, "cookie", {
+      writable: true,
+      value: "csrftoken=stale-token",
+    });
+
+    mockFetch.mockImplementationOnce(async (url, init) => {
+      expect(url).toBe("/api/settings/");
+      expect(init?.headers["X-CSRFToken"]).toBe("stale-token");
+      return {
+        ok: false,
+        status: 403,
+        json: async () => ({ error: "CSRF Failed" }),
+      };
+    });
+    mockFetch.mockImplementationOnce(async (url) => {
+      expect(url).toBe("/api/auth/me/");
+      document.cookie = "csrftoken=fresh-token";
+      return jsonResponse({ authenticated: true, user: { id: 1, username: "a", email: "a@b.com" } });
+    });
+    mockFetch.mockImplementationOnce(async (url, init) => {
+      expect(url).toBe("/api/settings/");
+      expect(init?.headers["X-CSRFToken"]).toBe("fresh-token");
+      return jsonResponse({
+        google_api_key_set: false,
+        google_api_key_preview: "",
+        gemini_model: "gemini-2.5-flash",
+      });
+    });
+
+    const result = await api.updateSettings({ gemini_model: "gemini-2.5-flash" });
+
+    expect(result.gemini_model).toBe("gemini-2.5-flash");
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+  });
+
   it("does not attach CSRF token on GET requests", async () => {
     mockFetch.mockReturnValueOnce(jsonResponse({ authenticated: true, user: { id: 1, username: "a", email: "a@b.com" } }));
 
@@ -148,6 +210,14 @@ describe("scanner API functions", () => {
     await api.getAiReport(5);
 
     expect(mockFetch.mock.calls[0][0]).toBe("/api/github/scan/5/ai-report/");
+  });
+
+  it("getAdkTraceSnapshot fetches correct URL", async () => {
+    mockFetch.mockReturnValueOnce(jsonResponse({ phases: [], events: [], artifacts: {} }));
+
+    await api.getAdkTraceSnapshot(7);
+
+    expect(mockFetch.mock.calls[0][0]).toBe("/api/github/scan/7/adk-trace/");
   });
 });
 

@@ -3,7 +3,15 @@ from django.contrib import admin
 from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import display
 
-from .models import HttpRequest, AnalysisResult, Alert
+from .models import (
+    HttpRequest,
+    AnalysisResult,
+    Alert,
+    GcpObservedService,
+    GcpSecurityEvent,
+    GcpSecurityIncident,
+    GcpServiceHealth,
+)
 
 
 # --- Inlines ---
@@ -131,3 +139,61 @@ class AlertAdmin(ModelAdmin):
     def mark_acknowledged(self, request, queryset):
         updated = queryset.update(acknowledged=True)
         self.message_user(request, f"{updated} alert(s) marked as acknowledged.")
+
+
+# --- GCP Estate & Security ---
+
+@admin.register(GcpObservedService)
+class GcpObservedServiceAdmin(ModelAdmin):
+    list_display = ["service_name", "region", "latest_revision", "instance_count", "risk_score", "updated_at"]
+    list_filter = ["region", "project_id"]
+    search_fields = ["service_name", "project_id"]
+    readonly_fields = [
+        "user", "project_id", "service_name", "region", "latest_revision",
+        "instance_count", "url", "last_deployed_at", "risk_score", "risk_tags",
+        "request_rate", "error_rate", "p50_latency_ms", "p95_latency_ms", "p99_latency_ms",
+    ]
+    list_per_page = 50
+
+
+@admin.register(GcpSecurityEvent)
+class GcpSecurityEventAdmin(ModelAdmin):
+    list_display = ["timestamp", "source", "severity", "category", "service", "source_ip"]
+    list_filter = ["source", "severity", "category"]
+    search_fields = ["service", "source_ip", "path", "principal"]
+    date_hierarchy = "timestamp"
+    readonly_fields = [
+        "user", "source", "timestamp", "project_id", "region", "service", "revision",
+        "severity", "category", "source_ip", "principal", "path", "method", "status_code",
+        "trace_id", "request_id", "country", "geo_lat", "geo_lng",
+        "evidence_refs", "raw_payload_preview", "fact_fields", "inference_fields", "incident",
+    ]
+    list_per_page = 50
+
+
+@admin.register(GcpSecurityIncident)
+class GcpSecurityIncidentAdmin(ModelAdmin):
+    list_display = ["title", "priority", "status", "evidence_count", "last_seen"]
+    list_filter = ["priority", "status", "incident_type"]
+    search_fields = ["title", "incident_type", "narrative"]
+    readonly_fields = [
+        "user", "project_id", "incident_type", "priority", "confidence",
+        "evidence_count", "services_affected", "regions_affected", "title",
+        "narrative", "likely_cause", "next_steps", "ai_inference",
+        "first_seen", "last_seen", "acknowledged_by", "acknowledged_at",
+    ]
+    list_per_page = 50
+
+
+@admin.register(GcpServiceHealth)
+class GcpServiceHealthAdmin(ModelAdmin):
+    list_display = ["service_name", "region", "request_count", "error_count", "bucket_end"]
+    list_filter = ["service_name", "region"]
+    search_fields = ["service_name", "project_id"]
+    readonly_fields = [
+        "user", "project_id", "service_name", "region",
+        "request_count", "error_count", "latency_p50_ms", "latency_p95_ms", "latency_p99_ms",
+        "instance_count", "max_concurrency", "cpu_utilization", "memory_utilization",
+        "unhealthy_revision_count", "bucket_start", "bucket_end",
+    ]
+    list_per_page = 50

@@ -18,7 +18,7 @@ class TestRegister:
             format="json",
         )
         assert resp.status_code == 201
-        assert resp.data["username"] == "newuser"
+        assert resp.data["user"]["username"] == "newuser"
         assert User.objects.filter(username="newuser").exists()
         assert UserSettings.objects.filter(user__username="newuser").exists()
 
@@ -63,7 +63,7 @@ class TestLogin:
             format="json",
         )
         assert resp.status_code == 200
-        assert resp.data["username"] == "loginuser"
+        assert resp.data["user"]["username"] == "loginuser"
 
     def test_wrong_password(self, api_client, user_factory):
         user_factory(username="loginuser", password="testpass123")

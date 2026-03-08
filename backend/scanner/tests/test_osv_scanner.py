@@ -76,7 +76,34 @@ class TestRunScanPipeline:
         _run_scan_pipeline(scan.id, {})
         scan.refresh_from_db()
         assert scan.scan_status == "completed"
+        mock_report.assert_called_once()
         mock_complete.assert_called_once()
+
+    @patch("scanner.services.code_scanner.scan_code_security")
+    @patch("scanner.services.osv_scanner.scan_code_security_github")
+    @patch("scanner.services.osv_scanner.generate_report")
+    @patch("scanner.services.osv_scanner.publish_scan_complete")
+    @patch("scanner.services.osv_scanner.publish_scan_progress")
+    def test_empty_dep_files_still_runs_github_code_scan(
+        self,
+        mock_progress,
+        mock_complete,
+        mock_report,
+        mock_gh_code,
+        mock_local_code,
+    ):
+        scan = GitHubScan.objects.create(
+            repo_name="test/repo",
+            repo_url="https://github.com/test/repo",
+            scan_status="scanning",
+        )
+
+        _run_scan_pipeline(scan.id, {}, pat="ghp_test", repo_full_name="test/repo", user_id=123)
+
+        scan.refresh_from_db()
+        assert scan.scan_status == "completed"
+        mock_report.assert_called_once()
+        mock_gh_code.assert_called_once_with(scan.id, "ghp_test", "test/repo", user_id=123)
 
     @responses.activate
     @patch("scanner.services.code_scanner.scan_code_security")

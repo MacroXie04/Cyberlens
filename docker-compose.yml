@@ -32,11 +32,26 @@ services:
     volumes:
       - ./backend:/app
     env_file: .env
+    environment:
+      RUN_DB_MIGRATIONS: "1"
+      GITHUB_FETCH_WORKERS: ${GITHUB_FETCH_WORKERS:-4}
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/api/auth/me/', timeout=5).read()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
     develop:
       watch:
         - action: rebuild
@@ -44,11 +59,15 @@ services:
 
   worker:
     build: ./backend
-    command: celery -A cyberlens worker -l INFO
+    command: celery -A cyberlens worker -l INFO --concurrency=${CELERY_WORKER_CONCURRENCY:-2}
     volumes:
       - ./backend:/app
     env_file: .env
+    environment:
+      GITHUB_FETCH_WORKERS: ${GITHUB_FETCH_WORKERS:-4}
     depends_on:
+      backend:
+        condition: service_healthy
       db:
         condition: service_healthy
       redis:
@@ -82,8 +101,10 @@ services:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public
     depends_on:
-      - backend
-      - realtime
+      backend:
+        condition: service_healthy
+      realtime:
+        condition: service_started
     develop:
       watch:
         - action: rebuild

@@ -14,6 +14,13 @@ class UserSettings(models.Model):
     gcp_service_name = models.CharField(max_length=100, blank=True, default="")
     gcp_region = models.CharField(max_length=50, blank=True, default="us-central1")
     gcp_service_account_key = models.TextField(blank=True, default="")
+    gcp_regions = models.JSONField(default=list, blank=True)
+    gcp_service_filters = models.JSONField(default=list, blank=True)
+    gcp_enabled_sources = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Enabled GCP data sources, e.g. cloud_run_logs, cloud_monitoring, load_balancer, cloud_armor, iam_audit, iap",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -50,18 +50,29 @@ npm run build      # tsc
 npm start          # node dist/index.js
 ```
 
-### Tests (backend only)
+### Tests
 ```bash
+# Backend (pytest)
 cd backend
 pytest                          # all tests
 pytest monitor/tests/           # monitor app tests
 pytest scanner/tests/           # scanner app tests
 pytest scanner/tests/test_views.py  # single test file
 pytest -k test_scan_detail      # single test by name
-```
-Config: `pytest.ini` sets `DJANGO_SETTINGS_MODULE=cyberlens.settings`, strict markers, verbose output, short traceback.
 
-Fixtures in `conftest.py`: factories for all models (`scan_factory`, `dependency_factory`, `vulnerability_factory`, `http_request_factory`, etc.), `mock_redis`, auto-use `_use_locmem_cache`.
+# Frontend (vitest + type check)
+cd frontend
+npm test                        # vitest run (all tests)
+npx tsc -b                      # type check only (no emit)
+```
+Backend config: `pytest.ini` sets `DJANGO_SETTINGS_MODULE=cyberlens.settings`, strict markers, verbose output, short traceback.
+
+Fixtures in `conftest.py`: factories for all models (`scan_factory`, `dependency_factory`, `vulnerability_factory`, `http_request_factory`, `gcp_service_factory`, `gcp_event_factory`, `gcp_incident_factory`, etc.), `mock_redis`, auto-use `_use_locmem_cache`.
+
+### CI
+GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`:
+- **Backend Tests**: Python 3.12, pytest with Redis service (SQLite for CI)
+- **Frontend Checks**: Node 20, `tsc -b` type check + `npm test` (vitest)
 
 ## Architecture
 
@@ -76,11 +87,19 @@ Frontend ←── Socket.IO ←── Realtime ←── Redis pub/sub ←─�
 
 ### Backend Apps
 
-**`monitor/`** — Real-time HTTP request monitoring
-- Models: `HttpRequest` → `AnalysisResult` (1:1) → `Alert` (1:N)
+**`monitor/`** — Real-time HTTP request monitoring + GCP Security SOC
+- Legacy models: `HttpRequest` → `AnalysisResult` (1:1) → `Alert` (1:N)
+- GCP models: `GcpObservedService`, `GcpSecurityEvent` → `GcpSecurityIncident`, `GcpServiceHealth`
 - `services/log_watcher.py`: Watchdog-based Nginx log monitor, batches 15 requests or 5s timeout
 - `services/ai_analyzer.py`: Celery task `analyze_batch` — uses Google ADK (Gemini 2.5 Flash) with Pydantic schemas for structured output
-- `services/redis_publisher.py`: Publishes to channels `cyberlens:{new_request,alert,stats_update,scan_progress,scan_complete}`
+- `services/gcp_aggregator.py`: Celery tasks for GCP polling — `gcp_fetch_logs`, `gcp_fetch_metrics`, `gcp_discover_services`, `gcp_fetch_timeseries`
+- `services/gcp_log_fetcher.py`: Multi-source GCP log fetcher (Cloud Run, Load Balancer, Cloud Armor, IAM Audit, IAP)
+- `services/gcp_event_parser.py`: Normalises raw logs into `GcpSecurityEvent` dicts with pattern-based attack classification
+- `services/gcp_rule_engine.py`: Incident clustering from event streams with configurable thresholds and auto-merge
+- `services/gcp_metrics_fetcher.py`: Cloud Monitoring API metrics (request count, latency, CPU, memory, instance count)
+- `services/gcp_discovery.py`: Cloud Run service/revision auto-discovery via Admin API v2
+- `services/redis_publisher.py`: Publishes to channels `cyberlens:{new_request,alert,stats_update,scan_progress,scan_complete,gcp_estate_snapshot,gcp_security_event,gcp_incident_update,gcp_service_health,gcp_timeseries_update}`
+- GCP REST endpoints: `/api/gcp-estate/{summary,services,timeseries,refresh}`, `/api/gcp-security/{events,incidents,incidents/:id,incidents/:id/ack,map}`
 
 **`scanner/`** — Dependency vulnerability + code security scanning
 - Models: `GitHubScan` → `Dependency` → `Vulnerability`, plus `AiReport` (1:1) and `CodeFinding` (1:N)
@@ -101,15 +120,15 @@ Frontend ←── Socket.IO ←── Realtime ←── Redis pub/sub ←─�
 - `App.tsx`: Three-tab layout — Live Monitor, Code Scan, Settings
 - `services/api.ts`: REST client with dual-backend support (local + optional remote Cloud Run)
 - `hooks/useSocket.ts`: Socket.IO hook for real-time events
-- `theme/theme.ts`: Material You (M3) design tokens applied as CSS custom properties
-- `pages/LiveMonitorPage.tsx`: Stats + D3 attack map + Recharts charts + live request stream
+- `theme/theme.ts`: Material You (M3) design tokens + `socColors` dark SOC theme tokens
+- `pages/LiveMonitorPage.tsx`: GCP Security SOC dashboard — dark-theme war room with estate matrix, threat timeline, perimeter lanes, geo attack map, evidence feed, incident queue, triage drawer
 - `pages/SupplyChainPage.tsx`: D3 dependency tree + vulnerability list + AI remediation report + code findings
 - `pages/SettingsPage.tsx`: Cloud Run URL, API key, GitHub PAT, project selection
 
 ### Realtime Service
 
 - `src/index.ts`: Express + Socket.IO server with session-based auth (verifies via backend `/api/verify-session/`)
-- `src/redis-subscriber.ts`: Subscribes to 5 Redis `cyberlens:*` channels, broadcasts parsed JSON to all Socket.IO clients
+- `src/redis-subscriber.ts`: Subscribes to 12 Redis `cyberlens:*` channels (7 legacy + 5 GCP), broadcasts parsed JSON to all Socket.IO clients
 
 ### Key Environment Variables (see .env.example)
 - `DATABASE_URL` — PostgreSQL connection string

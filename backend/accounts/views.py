@@ -16,7 +16,10 @@ def register_view(request):
     user = serializer.save()
     UserSettings.objects.create(user=user)
     login(request, user)
-    return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
+    return Response(
+        {"user": UserSerializer(user).data},
+        status=status.HTTP_201_CREATED,
+    )
 
 
 @api_view(["POST"])
@@ -35,7 +38,7 @@ def login_view(request):
             {"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED
         )
     login(request, user)
-    return Response(UserSerializer(user).data)
+    return Response({"user": UserSerializer(user).data})
 
 
 @api_view(["POST"])

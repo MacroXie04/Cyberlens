@@ -21,6 +21,38 @@ export const colors = {
   outlineVariant: "#BDBDBD",
 } as const;
 
+// SOC dark theme tokens
+export const socColors = {
+  bg: "#0a0e17",
+  bgCard: "#111827",
+  bgCardHover: "#1a2236",
+  bgPanel: "#0d1321",
+  border: "#1e293b",
+  borderActive: "#334155",
+  text: "#e2e8f0",
+  textMuted: "#94a3b8",
+  textDim: "#64748b",
+  accent: "#38bdf8",
+  accentDim: "#0ea5e9",
+  critical: "#ef4444",
+  criticalBg: "rgba(239,68,68,0.12)",
+  high: "#f97316",
+  highBg: "rgba(249,115,22,0.12)",
+  medium: "#eab308",
+  mediumBg: "rgba(234,179,8,0.12)",
+  low: "#22d3ee",
+  lowBg: "rgba(34,211,238,0.08)",
+  info: "#64748b",
+  infoBg: "rgba(100,116,139,0.1)",
+  safe: "#22c55e",
+  safeBg: "rgba(34,197,94,0.1)",
+  p1: "#ef4444",
+  p2: "#f97316",
+  p3: "#eab308",
+  p4: "#94a3b8",
+  pulse: "#38bdf8",
+} as const;
+
 export const radius = {
   card: "28px",
   chip: "20px",

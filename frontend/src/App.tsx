@@ -39,7 +39,7 @@ function Dashboard({
   const [adkKeySet, setAdkKeySet] = useState(false);
   const [adkKeyPreview, setAdkKeyPreview] = useState("");
   const [geminiModel, setGeminiModel] = useState("");
-  const [cloudRunUrl, setCloudRunUrl] = useState<string | null>(
+  const [cloudRunUrl] = useState<string | null>(
     () => sessionStorage.getItem("cloudRunUrl")
   );
 
@@ -102,14 +102,6 @@ function Dashboard({
     setGeminiModel(model);
   }, []);
 
-  const handleCloudRunConnect = useCallback((url: string) => {
-    setCloudRunUrl(url);
-  }, []);
-
-  const handleCloudRunDisconnect = useCallback(() => {
-    setCloudRunUrl(null);
-  }, []);
-
   return (
     <DashboardLayout
       activeTab={activeTab}
@@ -136,9 +128,6 @@ function Dashboard({
           onAdkKeyChange={handleAdkKeyChange}
           geminiModel={geminiModel}
           onModelChange={handleModelChange}
-          cloudRunUrl={cloudRunUrl}
-          onCloudRunConnect={handleCloudRunConnect}
-          onCloudRunDisconnect={handleCloudRunDisconnect}
         />
       )}
     </DashboardLayout>

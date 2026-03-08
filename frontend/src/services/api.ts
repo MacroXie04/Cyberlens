@@ -10,8 +10,15 @@ import type {
   GitHubScan,
   AiReport,
   CodeFinding,
+  AdkTraceSnapshot,
   CloudRunLogEntry,
   GcpSettings,
+  GcpEstateSummary,
+  GcpObservedService,
+  GcpSecurityEvent,
+  GcpSecurityIncident,
+  GcpServiceHealth,
+  GcpGeoThreatPoint,
 } from "../types";
 
 const LOCAL_BASE = "/api";
@@ -30,24 +37,58 @@ function getCsrfToken(): string {
   return match ? decodeURIComponent(match[1]) : "";
 }
 
+let csrfBootstrapPromise: Promise<string> | null = null;
+
+async function ensureCsrfToken(forceRefresh = false): Promise<string> {
+  const existingToken = getCsrfToken();
+  if (existingToken && !forceRefresh) {
+    return existingToken;
+  }
+
+  if (!csrfBootstrapPromise || forceRefresh) {
+    csrfBootstrapPromise = fetch(`${LOCAL_BASE}/auth/me/`, {
+      credentials: "same-origin",
+    })
+      .catch(() => undefined)
+      .then(() => getCsrfToken())
+      .finally(() => {
+        csrfBootstrapPromise = null;
+      });
+  }
+
+  return csrfBootstrapPromise;
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const isRemote = !url.startsWith("/");
   const method = init?.method?.toUpperCase() || "GET";
   const needsCsrf = !isRemote && ["POST", "PUT", "DELETE", "PATCH"].includes(method);
 
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(init?.headers as Record<string, string>),
+  const doFetch = async (forceCsrfRefresh = false) => {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(init?.headers as Record<string, string>),
+    };
+
+    if (needsCsrf) {
+      const csrfToken = await ensureCsrfToken(forceCsrfRefresh);
+      if (csrfToken) {
+        headers["X-CSRFToken"] = csrfToken;
+      }
+    }
+
+    return fetch(url, {
+      ...init,
+      headers,
+      credentials: isRemote ? "omit" : "same-origin",
+    });
   };
-  if (needsCsrf) {
-    headers["X-CSRFToken"] = getCsrfToken();
+
+  let res = await doFetch();
+  if (!isRemote && needsCsrf && res.status === 403) {
+    res = await doFetch(true);
   }
 
-  const res = await fetch(url, {
-    ...init,
-    headers,
-    credentials: isRemote ? "omit" : "same-origin",
-  });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `HTTP ${res.status}`);
@@ -137,6 +178,9 @@ export const getAiReport = (id: number) =>
 export const getCodeFindings = (id: number) =>
   fetchJson<CodeFinding[]>(`${LOCAL_BASE}/github/scan/${id}/code-findings/`);
 
+export const getAdkTraceSnapshot = (id: number) =>
+  fetchJson<AdkTraceSnapshot>(`${LOCAL_BASE}/github/scan/${id}/adk-trace/`);
+
 // Settings (always local)
 export const getSettings = () =>
   fetchJson<{ google_api_key_set: boolean; google_api_key_preview: string; gemini_model: string }>(
@@ -171,6 +215,81 @@ export const updateGcpSettings = (data: {
   fetchJson<GcpSettings>(`${LOCAL_BASE}/settings/gcp/`, {
     method: "PUT",
     body: JSON.stringify(data),
+  });
+
+// GCP Estate & Security (always local — backend aggregates from GCP)
+export const getGcpEstateSummary = (minutes?: number) => {
+  const qs = minutes ? `?minutes=${minutes}` : "";
+  return fetchJson<GcpEstateSummary>(`${LOCAL_BASE}/gcp-estate/summary/${qs}`);
+};
+
+export const getGcpEstateServices = () =>
+  fetchJson<GcpObservedService[]>(`${LOCAL_BASE}/gcp-estate/services/`);
+
+export const getGcpEstateTimeseries = (params?: {
+  minutes?: number;
+  service?: string;
+}) => {
+  const searchParams = new URLSearchParams();
+  if (params?.minutes) searchParams.set("minutes", String(params.minutes));
+  if (params?.service) searchParams.set("service", params.service);
+  const qs = searchParams.toString();
+  return fetchJson<GcpServiceHealth[]>(
+    `${LOCAL_BASE}/gcp-estate/timeseries/${qs ? `?${qs}` : ""}`
+  );
+};
+
+export const getGcpSecurityEvents = (params?: {
+  minutes?: number;
+  severity?: string;
+  category?: string;
+  source?: string;
+  service?: string;
+  limit?: number;
+  offset?: number;
+}) => {
+  const searchParams = new URLSearchParams();
+  if (params?.minutes) searchParams.set("minutes", String(params.minutes));
+  if (params?.severity) searchParams.set("severity", params.severity);
+  if (params?.category) searchParams.set("category", params.category);
+  if (params?.source) searchParams.set("source", params.source);
+  if (params?.service) searchParams.set("service", params.service);
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  if (params?.offset) searchParams.set("offset", String(params.offset));
+  const qs = searchParams.toString();
+  return fetchJson<{ count: number; results: GcpSecurityEvent[] }>(
+    `${LOCAL_BASE}/gcp-security/events/${qs ? `?${qs}` : ""}`
+  );
+};
+
+export const getGcpSecurityIncidents = (status?: string) => {
+  const qs = status ? `?status=${status}` : "";
+  return fetchJson<GcpSecurityIncident[]>(
+    `${LOCAL_BASE}/gcp-security/incidents/${qs}`
+  );
+};
+
+export const getGcpSecurityIncidentDetail = (id: number) =>
+  fetchJson<GcpSecurityIncident>(
+    `${LOCAL_BASE}/gcp-security/incidents/${id}/`
+  );
+
+export const ackGcpSecurityIncident = (id: number, status: string) =>
+  fetchJson<GcpSecurityIncident>(
+    `${LOCAL_BASE}/gcp-security/incidents/${id}/ack/`,
+    { method: "POST", body: JSON.stringify({ status }) }
+  );
+
+export const getGcpSecurityMap = (minutes?: number) => {
+  const qs = minutes ? `?minutes=${minutes}` : "";
+  return fetchJson<GcpGeoThreatPoint[]>(
+    `${LOCAL_BASE}/gcp-security/map/${qs}`
+  );
+};
+
+export const triggerGcpRefresh = () =>
+  fetchJson<{ status: string }>(`${LOCAL_BASE}/gcp-estate/refresh/`, {
+    method: "POST",
   });
 
 // Cloud Run Logs (always local — backend fetches from GCP)
