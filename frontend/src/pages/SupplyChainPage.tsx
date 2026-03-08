@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import AdkPipelineView from "../components/SupplyChain/AdkPipelineView";
+import AgentActivityPanel from "../components/SupplyChain/AgentActivityPanel";
+import AgentRequestLog from "../components/SupplyChain/AgentRequestLog";
 import AiRemediationReport from "../components/SupplyChain/AiRemediationReport";
 import CodeScanLiveView from "../components/SupplyChain/CodeScanLiveView";
 import CodeSecurityFindings from "../components/SupplyChain/CodeSecurityFindings";
@@ -8,6 +10,7 @@ import DependencyTree from "../components/SupplyChain/DependencyTree";
 import ScanProgress from "../components/SupplyChain/ScanProgress";
 import VulnerabilityList from "../components/SupplyChain/VulnerabilityList";
 import { useSocket } from "../hooks/useSocket";
+import { deriveScanProgress, type ScanProgressStep } from "./supplyChainScanProgress";
 import {
   getAdkTraceSnapshot,
   getAiReport,
@@ -264,7 +267,7 @@ export default function SupplyChainPage({ selectedProject }: Props) {
   const [codeFindings, setCodeFindings] = useState<CodeFinding[]>([]);
   const [scanning, setScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState("");
-  const [scanStep, setScanStep] = useState("");
+  const [scanStep, setScanStep] = useState<ScanProgressStep>("");
   const [resultTab, setResultTab] = useState<ResultTab>("overview");
   const [adkTrace, setAdkTrace] = useState<AdkTraceSnapshot | null>(null);
   const [adkTraceLoading, setAdkTraceLoading] = useState(false);
@@ -272,6 +275,7 @@ export default function SupplyChainPage({ selectedProject }: Props) {
   const scanIdRef = useRef<number | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastProjectKeyRef = useRef<string | null>(null);
+  const lastRealtimeEventAtRef = useRef(0);
 
   const [codeScanStreamEvents, setCodeScanStreamEvents] = useState<CodeScanStreamEvent[]>([]);
   const [codeScanActive, setCodeScanActive] = useState(false);
@@ -309,12 +313,19 @@ export default function SupplyChainPage({ selectedProject }: Props) {
   const fetchScanResults = useCallback(
     async (scanId: number) => {
       setScanning(false);
-      setScanMessage("");
-      setScanStep("completed");
       setCodeScanActive(false);
       try {
         const results = await getScanResults(scanId);
         setScan(results);
+
+        if (results.scan_status === "failed") {
+          setScanStep("failed");
+          setScanMessage(results.error_message || "Scan failed");
+          return;
+        }
+
+        setScanMessage("");
+        setScanStep("completed");
 
         const [aiReportResult, findingsResult, traceResult] = await Promise.allSettled([
           getAiReport(scanId),
@@ -341,6 +352,24 @@ export default function SupplyChainPage({ selectedProject }: Props) {
     }
   }, []);
 
+  const resetScanState = useCallback(() => {
+    stopPolling();
+    scanIdRef.current = null;
+    lastRealtimeEventAtRef.current = 0;
+    setScan(null);
+    setReport(null);
+    setCodeFindings([]);
+    setScanning(false);
+    setScanMessage("");
+    setScanStep("");
+    setResultTab("overview");
+    setAdkTrace(null);
+    setAdkTraceLoading(false);
+    setCodeScanStreamEvents([]);
+    setCodeScanActive(false);
+    setCodeScanSummary(null);
+  }, [stopPolling]);
+
   const startPolling = useCallback(
     (scanId: number) => {
       stopPolling();
@@ -349,6 +378,17 @@ export default function SupplyChainPage({ selectedProject }: Props) {
           const result = await getScanResults(scanId);
           setScan(result);
           void refreshLiveArtifacts(scanId);
+          if (
+            result.scan_status === "scanning" &&
+            Date.now() - lastRealtimeEventAtRef.current > 10000
+          ) {
+            const derived = deriveScanProgress(result);
+            setScanStep(derived.step);
+            setScanMessage(derived.message);
+            if (derived.codeScanActive) {
+              setCodeScanActive(true);
+            }
+          }
           if (result.scan_status === "completed" || result.scan_status === "failed") {
             stopPolling();
             if (result.scan_status === "completed") {
@@ -372,6 +412,7 @@ export default function SupplyChainPage({ selectedProject }: Props) {
 
   const runScan = useCallback(async () => {
     if (!selectedProject) return;
+    lastRealtimeEventAtRef.current = 0;
     setScanning(true);
     setScanMessage("Starting scan...");
     setScanStep("starting");
@@ -392,86 +433,36 @@ export default function SupplyChainPage({ selectedProject }: Props) {
       void loadAdkTrace(result.id);
       startPolling(result.id);
     } catch (err) {
-      setScanMessage(err instanceof Error ? err.message : "Scan failed");
+      const msg = err instanceof Error ? err.message : "Scan failed";
+      setScanMessage(msg);
+      setScanStep("failed");
       setScanning(false);
     }
   }, [loadAdkTrace, selectedProject, startPolling]);
-
-  const hydrateExistingScan = useCallback(
-    async (scanId: number) => {
-      if (!selectedProject) return;
-      setAdkTrace(emptyTraceSnapshot());
-      setAdkTraceLoading(true);
-      try {
-        const result = await getScanResults(scanId);
-        if (result.repo_name !== selectedProject.repo.full_name) {
-          sessionStorage.removeItem(scanStorageKey(selectedProject.repo.full_name));
-          await runScan();
-          return;
-        }
-
-        setScan(result);
-        scanIdRef.current = scanId;
-        await loadAdkTrace(scanId);
-
-        if (result.scan_status === "completed") {
-          await fetchScanResults(scanId);
-          return;
-        }
-
-        if (result.scan_status === "failed") {
-          setScanning(false);
-          setScanStep("failed");
-          setScanMessage("Scan failed");
-          return;
-        }
-
-        setScanning(true);
-        setResultTab("pipeline");
-        setScanMessage("Resuming scan...");
-        setScanStep(result.code_scan_phase ? "code_scan" : "starting");
-        startPolling(scanId);
-      } catch {
-        sessionStorage.removeItem(scanStorageKey(selectedProject.repo.full_name));
-        await runScan();
-      } finally {
-        setAdkTraceLoading(false);
-      }
-    },
-    [fetchScanResults, loadAdkTrace, runScan, selectedProject, startPolling]
-  );
 
   useEffect(() => {
     const key = repoFullName;
     if (key && key !== lastProjectKeyRef.current) {
       lastProjectKeyRef.current = key;
-      const storedScanId = sessionStorage.getItem(scanStorageKey(key));
-      if (storedScanId) {
-        void hydrateExistingScan(Number(storedScanId));
-      } else {
-        void runScan();
-      }
+      resetScanState();
     } else if (!key) {
       lastProjectKeyRef.current = null;
-      setScan(null);
-      setReport(null);
-      setCodeFindings([]);
-      setAdkTrace(null);
-      setCodeScanStreamEvents([]);
-      setCodeScanActive(false);
+      resetScanState();
     }
-  }, [hydrateExistingScan, repoFullName, runScan]);
+  }, [repoFullName, resetScanState]);
 
   const onScanProgress = useCallback((data: { scan_id: number; step: string; message: string }) => {
     if (scanIdRef.current && data.scan_id === scanIdRef.current) {
+      lastRealtimeEventAtRef.current = Date.now();
       setScanMessage(data.message);
-      setScanStep(data.step);
+      setScanStep(data.step as ScanProgressStep);
     }
   }, []);
 
   const onScanComplete = useCallback(
     async (data: { scan_id: number }) => {
       if (scanIdRef.current && data.scan_id === scanIdRef.current) {
+        lastRealtimeEventAtRef.current = Date.now();
         stopPolling();
         await fetchScanResults(data.scan_id);
       }
@@ -481,6 +472,7 @@ export default function SupplyChainPage({ selectedProject }: Props) {
 
   const onCodeScanStream = useCallback((data: CodeScanStreamEvent) => {
     if (scanIdRef.current && data.scan_id === scanIdRef.current) {
+      lastRealtimeEventAtRef.current = Date.now();
       if (data.type === "scan_start") {
         setCodeScanActive(true);
         setCodeScanStreamEvents([data]);
@@ -510,6 +502,7 @@ export default function SupplyChainPage({ selectedProject }: Props) {
 
   const onAdkTraceStream = useCallback((data: AdkTraceEvent) => {
     if (scanIdRef.current && data.scan_id === scanIdRef.current) {
+      lastRealtimeEventAtRef.current = Date.now();
       setAdkTrace((prev) => mergeTraceEvent(prev, data));
       if (data.kind === "stage_started") {
         if (
@@ -532,6 +525,63 @@ export default function SupplyChainPage({ selectedProject }: Props) {
 
   useSocket({ onScanProgress, onScanComplete, onCodeScanStream, onAdkTraceStream });
 
+  const codeAgentRequests = useMemo(() => {
+    if (!adkTrace?.events) return [];
+    const phases = new Set(["chunk_summary", "candidate_generation", "evidence_expansion", "verification", "repo_synthesis"]);
+    return adkTrace.events.filter(e => phases.has(e.phase) && e.kind === "llm_completed");
+  }, [adkTrace]);
+
+  // Derive token/activity state for AgentActivityPanel from existing data
+  const panelTokens = useMemo(() => {
+    // Use latest token_update or scan_summary event from code scan stream
+    for (let i = codeScanStreamEvents.length - 1; i >= 0; i--) {
+      const evt = codeScanStreamEvents[i];
+      if (evt.type === "scan_summary" || evt.type === "token_update") {
+        return {
+          input: evt.input_tokens ?? 0,
+          output: evt.output_tokens ?? 0,
+          total: evt.total_tokens ?? 0,
+        };
+      }
+    }
+    return { input: 0, output: 0, total: 0 };
+  }, [codeScanStreamEvents]);
+
+  const panelFilesInfo = useMemo(() => {
+    let filesScanned = 0;
+    let totalFiles = 0;
+    for (let i = codeScanStreamEvents.length - 1; i >= 0; i--) {
+      const evt = codeScanStreamEvents[i];
+      if (evt.files_scanned != null) {
+        filesScanned = evt.files_scanned;
+        totalFiles = evt.total_files ?? totalFiles;
+        break;
+      }
+      if (evt.type === "scan_start" && evt.total_files != null) {
+        totalFiles = evt.total_files;
+      }
+    }
+    return { filesScanned, totalFiles };
+  }, [codeScanStreamEvents]);
+
+  const panelActivity = useMemo(() => {
+    // Prefer latest ADK trace event label for richer context
+    if (adkTrace?.events.length) {
+      const latest = adkTrace.events[adkTrace.events.length - 1];
+      if (latest.label) return latest.label;
+    }
+    // Fall back to the current scan message
+    return scanMessage || "Waiting for agent activity...";
+  }, [adkTrace, scanMessage]);
+
+  const panelWarning = useMemo(() => {
+    for (let i = codeScanStreamEvents.length - 1; i >= 0; i--) {
+      const evt = codeScanStreamEvents[i];
+      if (evt.type === "warning") return evt.message || evt.error || "";
+    }
+    return "";
+  }, [codeScanStreamEvents]);
+
   const dependencies: Dependency[] = scan?.dependencies || [];
   const liveCodeFindings = codeFindings.length > 0 ? codeFindings : scan?.code_findings || [];
   const vulnerableDeps = dependencies.filter((dependency) => dependency.is_vulnerable);
@@ -541,6 +591,7 @@ export default function SupplyChainPage({ selectedProject }: Props) {
   );
   const isCompleted = scan?.scan_status === "completed";
   const hasPipeline = Boolean(adkTrace?.events.length || scanning);
+  const isIdle = Boolean(selectedProject && !scan && !scanning && !hasPipeline);
   const scoreColor =
     (scan?.security_score ?? 0) >= 80
       ? "var(--md-safe)"
@@ -691,6 +742,7 @@ export default function SupplyChainPage({ selectedProject }: Props) {
             label="Security Score"
             value={scan?.security_score ?? 0}
             suffix="/100"
+            detail={`Deps: ${scan?.dependency_score ?? 0} | Code: ${scan?.code_security_score ?? 0}`}
             color={scoreColor}
           />
           <StatCard
@@ -725,9 +777,42 @@ export default function SupplyChainPage({ selectedProject }: Props) {
         </div>
       )}
 
-      {scanning && <ScanProgress currentStep={scanStep as any} message={scanMessage} />}
+      {scanning && <ScanProgress currentStep={scanStep} message={scanMessage} />}
 
-      {codeScanActive && <CodeScanLiveView streamEvents={codeScanStreamEvents} />}
+      {scanning && adkTrace && (
+        <AgentActivityPanel
+          adkTrace={adkTrace}
+          tokens={panelTokens}
+          filesScanned={panelFilesInfo.filesScanned}
+          totalFiles={panelFilesInfo.totalFiles}
+          currentActivity={panelActivity}
+          warningMessage={panelWarning || undefined}
+        />
+      )}
+
+      {codeScanActive && <CodeScanLiveView streamEvents={codeScanStreamEvents} agentRequests={codeAgentRequests} />}
+
+      {isIdle && (
+        <div
+          className="card"
+          style={{
+            padding: 24,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            border: "1px dashed var(--md-outline-variant)",
+            background: "var(--md-surface-container)",
+          }}
+        >
+          <div style={{ fontSize: 16, fontWeight: 600, color: "var(--md-on-surface)" }}>
+            Scan is idle
+          </div>
+          <div style={{ fontSize: 13, color: "var(--md-on-surface-variant)", lineHeight: 1.6 }}>
+            Selecting a repository or opening the Code Scan page will not start a scan automatically.
+            Click the <strong>Scan</strong> button when you want to run one.
+          </div>
+        </div>
+      )}
 
       {!scanning && scanStep === "failed" && (
         <div
@@ -740,17 +825,17 @@ export default function SupplyChainPage({ selectedProject }: Props) {
             gap: 12,
           }}
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--md-error)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--md-error)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
             <circle cx="12" cy="12" r="10" />
             <line x1="15" y1="9" x2="9" y2="15" />
             <line x1="9" y1="9" x2="15" y2="15" />
           </svg>
-          <div>
+          <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 14, fontWeight: 500, color: "var(--md-error)" }}>
               Scan failed
             </div>
-            <div style={{ fontSize: 13, color: "var(--md-on-surface-variant)", marginTop: 2 }}>
-              Something went wrong. Try scanning again.
+            <div style={{ fontSize: 13, color: "var(--md-on-surface-variant)", marginTop: 2, wordBreak: "break-word" }}>
+              {scan?.error_message || scanMessage || "Something went wrong. Try scanning again."}
             </div>
           </div>
         </div>
@@ -868,6 +953,7 @@ export default function SupplyChainPage({ selectedProject }: Props) {
                     </span>
                   </div>
                 )}
+                <AgentRequestLog events={codeAgentRequests} loading={scanning} />
                 {scanning && liveCodeFindings.length === 0 && (
                   <InlineScanNotice message="Code findings will stream in here while verification completes." />
                 )}

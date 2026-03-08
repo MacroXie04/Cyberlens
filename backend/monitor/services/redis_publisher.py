@@ -1,25 +1,37 @@
 import json
 import logging
 
-import redis
-from django.conf import settings
-
 logger = logging.getLogger(__name__)
 
 _client = None
+_checked = False
 
 
 def _get_redis():
-    global _client
-    if _client is None:
-        _client = redis.from_url(settings.REDIS_URL)
+    global _client, _checked
+    if _checked:
+        return _client
+    _checked = True
+    try:
+        from django.conf import settings
+        redis_url = getattr(settings, "REDIS_URL", "")
+        if not redis_url:
+            return None
+        import redis
+        _client = redis.from_url(redis_url)
+        _client.ping()
+    except Exception:
+        _client = None
     return _client
 
 
 def _publish(channel: str, payload: dict):
+    client = _get_redis()
+    if client is None:
+        return
     try:
-        _get_redis().publish(channel, json.dumps(payload))
-    except redis.RedisError as exc:
+        client.publish(channel, json.dumps(payload))
+    except Exception as exc:
         logger.warning("Redis publish skipped for %s: %s", channel, exc)
 
 

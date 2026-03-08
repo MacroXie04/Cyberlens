@@ -5,6 +5,10 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+
+class GitHubRepositoryFetchError(RuntimeError):
+    """Raised when repository metadata cannot be fetched from GitHub."""
+
 GITHUB_API = "https://api.github.com"
 
 SOURCE_EXTENSIONS = {
@@ -128,9 +132,11 @@ def _get_repo_tree(pat: str, repo_full_name: str) -> list[dict]:
         )
         tree_resp.raise_for_status()
         return tree_resp.json().get("tree", [])
-    except requests.RequestException:
+    except requests.RequestException as exc:
         logger.exception("Failed to fetch repo tree for %s", repo_full_name)
-        return []
+        raise GitHubRepositoryFetchError(
+            f"Failed to fetch repo tree for {repo_full_name}: {exc}"
+        ) from exc
 
 
 def _should_skip_path(path: str) -> bool:

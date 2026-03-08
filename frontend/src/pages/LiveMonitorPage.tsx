@@ -8,6 +8,7 @@ import {
   getGcpSecurityIncidents,
   getGcpSecurityMap,
   triggerGcpRefresh,
+  ensureGcpCollection,
 } from "../services/api";
 import type {
   GcpEstateSummary,
@@ -57,6 +58,9 @@ export default function LiveMonitorPage({ cloudRunUrl }: Props) {
   // Sync status
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [collectionErrors, setCollectionErrors] = useState<Record<string, string>>({});
 
   // Derived data
   const projectId = summary?.project_id || "";
@@ -66,6 +70,11 @@ export default function LiveMonitorPage({ cloudRunUrl }: Props) {
   const serviceNameList = [
     ...new Set(services.map((s) => s.service_name).filter(Boolean)),
   ].sort();
+  const estateEmptyStateMessage =
+    collectionErrors.discovery ||
+    (Object.keys(collectionErrors).length > 0
+      ? "No Cloud Run services discovered yet. Resolve the data collection issues above and refresh."
+      : undefined);
 
   // Perimeter events (filtered for perimeter lane sources)
   const perimeterEvents = events.filter(
@@ -85,13 +94,19 @@ export default function LiveMonitorPage({ cloudRunUrl }: Props) {
     return true;
   });
 
-  // Fetch data
+  // Fetch data — use allSettled so one failing endpoint doesn't block others
   const fetchData = useCallback(
     async (minutes: number) => {
       try {
         setConfigError(null);
-        const [summaryData, servicesData, timeseriesData, eventsData, incidentData, mapData] =
-          await Promise.all([
+        try {
+          await ensureGcpCollection();
+        } catch (err) {
+          console.error("GCP collection bootstrap failed:", err);
+        }
+
+        const [summaryRes, servicesRes, timeseriesRes, eventsRes, incidentRes, mapRes] =
+          await Promise.allSettled([
             getGcpEstateSummary(minutes),
             getGcpEstateServices(),
             getGcpEstateTimeseries({ minutes }),
@@ -105,20 +120,34 @@ export default function LiveMonitorPage({ cloudRunUrl }: Props) {
             getGcpSecurityIncidents(),
             getGcpSecurityMap(minutes),
           ]);
-        setSummary(summaryData);
-        setServices(servicesData);
-        setTimeseries(timeseriesData);
-        setEvents(eventsData.results);
-        setIncidents(incidentData);
-        setGeoData(mapData);
+
+        // Check if the summary call indicates a config error
+        if (summaryRes.status === "rejected") {
+          const msg = summaryRes.reason instanceof Error
+            ? summaryRes.reason.message
+            : String(summaryRes.reason);
+          if (msg.includes("not configured") || msg.includes("HTTP 400")) {
+            setConfigError(
+              "GCP project not configured. Go to Settings to set up your GCP service account and project ID."
+            );
+            return;
+          }
+        }
+
+        if (summaryRes.status === "fulfilled") {
+          setSummary(summaryRes.value);
+          setCollectionErrors(summaryRes.value.collection_errors ?? {});
+        }
+        if (servicesRes.status === "fulfilled") setServices(servicesRes.value);
+        if (timeseriesRes.status === "fulfilled") setTimeseries(timeseriesRes.value);
+        if (eventsRes.status === "fulfilled") setEvents(eventsRes.value.results);
+        if (incidentRes.status === "fulfilled") setIncidents(incidentRes.value);
+        if (mapRes.status === "fulfilled") setGeoData(mapRes.value);
         setLastSync(new Date().toLocaleTimeString());
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes("not configured") || msg.includes("HTTP 400")) {
-          setConfigError(
-            "GCP project not configured. Go to Settings to set up your GCP service account and project ID."
-          );
-        }
+        console.error("Unexpected fetch error:", err);
+      } finally {
+        setLoading(false);
       }
     },
     [selectedSource, selectedSeverity, selectedService]
@@ -179,9 +208,18 @@ export default function LiveMonitorPage({ cloudRunUrl }: Props) {
     cloudRunUrl
   );
 
-  const handleRefresh = useCallback(() => {
-    triggerGcpRefresh().catch(console.error);
-    fetchData(timeRange);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await triggerGcpRefresh();
+      // Wait briefly for tasks to execute before re-fetching
+      await new Promise((r) => setTimeout(r, 2000));
+      await fetchData(timeRange);
+    } catch (err) {
+      console.error("Refresh failed:", err);
+    } finally {
+      setRefreshing(false);
+    }
   }, [fetchData, timeRange]);
 
   const handleSelectEvent = useCallback((evt: GcpSecurityEvent) => {
@@ -198,6 +236,39 @@ export default function LiveMonitorPage({ cloudRunUrl }: Props) {
     setSelectedIncident(null);
     setSelectedEvent(null);
   }, []);
+
+  // Loading state — first fetch hasn't completed yet
+  if (loading && !configError) {
+    return (
+      <div
+        style={{
+          background: socColors.bg,
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: socColors.text,
+          flexDirection: "column",
+          gap: 16,
+        }}
+      >
+        <div
+          style={{
+            width: 32,
+            height: 32,
+            border: `3px solid ${socColors.border}`,
+            borderTop: `3px solid ${socColors.accent}`,
+            borderRadius: "50%",
+            animation: "spin 1s linear infinite",
+          }}
+        />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <span style={{ color: socColors.textMuted, fontSize: 14 }}>
+          Connecting to GCP Security Dashboard...
+        </span>
+      </div>
+    );
+  }
 
   // If GCP not configured, show setup prompt
   if (configError) {
@@ -267,6 +338,7 @@ export default function LiveMonitorPage({ cloudRunUrl }: Props) {
         onSourceChange={setSelectedSource}
         onSeverityChange={setSelectedSeverity}
         onTimeRangeChange={setTimeRange}
+        refreshing={refreshing}
         onRefresh={handleRefresh}
       />
 
@@ -286,11 +358,36 @@ export default function LiveMonitorPage({ cloudRunUrl }: Props) {
         {/* Hero KPI row */}
         <HeroKpiRow summary={summary} />
 
+        {/* Collection error banner */}
+        {Object.keys(collectionErrors).length > 0 && (
+          <div
+            style={{
+              background: "rgba(251, 191, 36, 0.1)",
+              border: "1px solid rgba(251, 191, 36, 0.4)",
+              borderRadius: 8,
+              padding: "12px 16px",
+              fontSize: 13,
+              color: "#fbbf24",
+              lineHeight: 1.6,
+            }}
+          >
+            <strong style={{ display: "block", marginBottom: 4 }}>
+              Data collection issues
+            </strong>
+            {Object.entries(collectionErrors).map(([source, msg]) => (
+              <div key={source} style={{ color: "rgba(251, 191, 36, 0.85)" }}>
+                <strong>{source}:</strong> {msg}
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Estate Matrix */}
         <EstateMatrix
           services={services}
           selectedService={selectedService}
           onSelectService={setSelectedService}
+          emptyStateMessage={estateEmptyStateMessage}
         />
 
         {/* Timeline + Map row */}

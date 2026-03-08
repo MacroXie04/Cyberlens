@@ -8,6 +8,12 @@ from google.cloud import monitoring_v3
 from google.oauth2 import service_account
 from google.protobuf.timestamp_pb2 import Timestamp
 
+from .gcp_errors import (
+    GcpCollectionError,
+    build_gcp_error_message,
+    format_exception_message,
+)
+
 logger = logging.getLogger(__name__)
 
 # Cloud Run metric types we care about
@@ -54,6 +60,7 @@ def fetch_service_metrics(
     interval = _make_interval(minutes_back)
 
     results: dict[str, dict] = {}
+    errors: list[Exception] = []
 
     for metric_key, metric_type in METRIC_TYPES.items():
         try:
@@ -92,8 +99,21 @@ def fetch_service_metrics(
                         dist = point.value.distribution_value
                         if dist.bucket_counts:
                             results[svc]["latency_mean_ms"] = dist.mean
-        except Exception:
+        except Exception as exc:
             logger.exception("Failed to fetch metric %s", metric_type)
+            errors.append(exc)
+
+    if errors and not results:
+        raise GcpCollectionError(
+            build_gcp_error_message(
+                "Cloud Monitoring metrics collection",
+                message=format_exception_message(errors[0]),
+                hint=(
+                    "Enable the Cloud Monitoring API and grant the service "
+                    "account roles/monitoring.viewer."
+                ),
+            )
+        )
 
     return results
 
@@ -143,7 +163,17 @@ def fetch_timeseries(
                     "service": svc,
                     "value": point.value.double_value or point.value.int64_value,
                 })
-    except Exception:
+    except Exception as exc:
         logger.exception("Failed to fetch timeseries %s", metric_type)
+        raise GcpCollectionError(
+            build_gcp_error_message(
+                "Cloud Monitoring timeseries collection",
+                message=format_exception_message(exc),
+                hint=(
+                    "Enable the Cloud Monitoring API and grant the service "
+                    "account roles/monitoring.viewer."
+                ),
+            )
+        ) from exc
 
     return sorted(results, key=lambda x: x["timestamp"])

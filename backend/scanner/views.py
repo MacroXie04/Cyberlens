@@ -1,9 +1,11 @@
 import logging
 import os
+import threading
 
 import requests as http_requests
 from django.conf import settings as django_settings
 from django.core.cache import cache
+from django.db import close_old_connections
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -30,12 +32,41 @@ def _get_user_settings(request):
     return settings_obj
 
 
+def _run_eager_task_in_thread(task, args, kwargs):
+    close_old_connections()
+    try:
+        task.apply(args=args, kwargs=kwargs)
+    except Exception:
+        logger.exception("Background eager task failed for %s", getattr(task, "name", task))
+    finally:
+        close_old_connections()
+
+
 def _dispatch_background_task(task, *args, **kwargs):
+    task_name = getattr(task, "name", getattr(task, "__name__", "task"))
+
+    if getattr(django_settings, "CELERY_TASK_ALWAYS_EAGER", False):
+        try:
+            thread = threading.Thread(
+                target=_run_eager_task_in_thread,
+                args=(task, args, kwargs),
+                daemon=True,
+                name=f"{task_name}-thread",
+            )
+            thread.start()
+            return
+        except Exception:
+            logger.exception(
+                "Background thread dispatch failed for %s; running inline", task_name
+            )
+            task.apply(args=args, kwargs=kwargs)
+            return
+
     try:
         task.delay(*args, **kwargs)
     except Exception:
         logger.exception(
-            "Background task dispatch failed for %s; running inline", task.name
+            "Background task dispatch failed for %s; running inline", task_name
         )
         task.apply(args=args, kwargs=kwargs)
 

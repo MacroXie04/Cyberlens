@@ -154,6 +154,16 @@ def _run_scan_pipeline(scan_id, dep_files, dir_path="", pat="", repo_full_name="
         publish_scan_progress({"scan_id": scan_id, "step": "code_scan", "message": "Scanning source code for security issues..."})
         scan_code_security_github(scan_id, pat, repo_full_name, user_id=user_id)
 
+    # Recalculate composite security score including code findings
+    from .score_calculator import calculate_code_security_score, calculate_composite_score
+
+    scan.refresh_from_db()
+    findings = list(scan.code_findings.values("severity"))
+    code_score = calculate_code_security_score(findings) if findings else 100
+    scan.code_security_score = code_score
+    scan.security_score = calculate_composite_score(scan.dependency_score, code_score)
+    scan.save(update_fields=["code_security_score", "security_score"])
+
     scan.scan_status = "completed"
     scan.save()
 
@@ -167,15 +177,17 @@ def run_full_scan(scan_id, pat, repo_full_name, user_id=None):
         publish_scan_progress({"scan_id": scan_id, "step": "fetching", "message": "Fetching dependency files from GitHub..."})
         dep_files = get_dependency_files(pat, repo_full_name)
         _run_scan_pipeline(scan_id, dep_files, pat=pat, repo_full_name=repo_full_name, user_id=user_id)
-    except Exception:
+    except Exception as exc:
         logger.exception("Full scan failed for %s", repo_full_name)
+        error_msg = str(exc)
         try:
             scan = GitHubScan.objects.get(id=scan_id)
             scan.scan_status = "failed"
-            scan.save()
+            scan.error_message = error_msg
+            scan.save(update_fields=["scan_status", "error_message"])
         except GitHubScan.DoesNotExist:
             pass
-        publish_scan_complete({"scan_id": scan_id, "status": "failed", "message": "Scan failed"})
+        publish_scan_complete({"scan_id": scan_id, "status": "failed", "message": error_msg})
 
 
 
@@ -188,12 +200,14 @@ def run_local_scan(scan_id, dir_path, user_id=None):
         publish_scan_progress({"scan_id": scan_id, "step": "fetching", "message": "Reading local dependency files..."})
         dep_files = get_local_dependency_files(dir_path)
         _run_scan_pipeline(scan_id, dep_files, dir_path=dir_path, user_id=user_id)
-    except Exception:
+    except Exception as exc:
         logger.exception("Local scan failed for %s", dir_path)
+        error_msg = str(exc)
         try:
             scan = GitHubScan.objects.get(id=scan_id)
             scan.scan_status = "failed"
-            scan.save()
+            scan.error_message = error_msg
+            scan.save(update_fields=["scan_status", "error_message"])
         except GitHubScan.DoesNotExist:
             pass
-        publish_scan_complete({"scan_id": scan_id, "status": "failed", "message": "Local scan failed"})
+        publish_scan_complete({"scan_id": scan_id, "status": "failed", "message": error_msg})

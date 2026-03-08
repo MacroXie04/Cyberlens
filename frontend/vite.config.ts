@@ -6,13 +6,19 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": {
-        target: "http://backend:8000",
+        target: "http://localhost:8000",
         changeOrigin: true,
+        configure: (proxy: { on: Function }) => {
+          proxy.on("error", () => {});
+        },
       },
       "/socket.io": {
-        target: "http://realtime:3001",
+        target: "http://localhost:3001",
         changeOrigin: true,
         ws: true,
+        configure: (proxy: { on: Function }) => {
+          proxy.on("error", () => {});
+        },
       },
     },
   },

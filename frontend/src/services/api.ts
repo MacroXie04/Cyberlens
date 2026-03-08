@@ -292,6 +292,11 @@ export const triggerGcpRefresh = () =>
     method: "POST",
   });
 
+export const ensureGcpCollection = () =>
+  fetchJson<{ triggered: boolean }>(`${LOCAL_BASE}/gcp-estate/ensure-collection/`, {
+    method: "POST",
+  });
+
 // Cloud Run Logs (always local — backend fetches from GCP)
 export const getCloudRunLogs = (params?: {
   limit?: number;

@@ -7,12 +7,14 @@ import os
 import re
 import time
 from collections import defaultdict
+from functools import cached_property
 
 from django.utils import timezone
 from google.adk import Agent
 from google.adk.agents.run_config import StreamingMode
+from google.adk.models.google_llm import Gemini
 from google.adk.runners import InMemoryRunner, RunConfig
-from google.genai import types
+from google.genai import Client, types
 from pydantic import BaseModel, Field
 
 from monitor.services.redis_publisher import publish_code_scan_stream
@@ -187,7 +189,32 @@ class RepoSynthesisReport(BaseModel):
     candidate_count: int = Field(default=0)
 
 
-def _build_chunk_summary_agent(model: str) -> Agent:
+class ScopedGemini(Gemini):
+    api_key: str
+
+    @cached_property
+    def api_client(self) -> Client:
+        return Client(
+            api_key=self.api_key,
+            http_options=types.HttpOptions(
+                headers=self._tracking_headers(),
+                retry_options=self.retry_options,
+                base_url=self.base_url,
+            ),
+        )
+
+    @cached_property
+    def _live_api_client(self) -> Client:
+        return Client(
+            api_key=self.api_key,
+            http_options=types.HttpOptions(
+                headers=self._tracking_headers(),
+                api_version=self._live_api_version,
+            ),
+        )
+
+
+def _build_chunk_summary_agent(model: Gemini) -> Agent:
     return Agent(
         name="code_chunk_summarizer",
         model=model,
@@ -197,7 +224,7 @@ def _build_chunk_summary_agent(model: str) -> Agent:
     )
 
 
-def _build_candidate_agent(model: str) -> Agent:
+def _build_candidate_agent(model: Gemini) -> Agent:
     return Agent(
         name="code_candidate_generator",
         model=model,
@@ -207,7 +234,7 @@ def _build_candidate_agent(model: str) -> Agent:
     )
 
 
-def _build_verifier_agent(model: str) -> Agent:
+def _build_verifier_agent(model: Gemini) -> Agent:
     return Agent(
         name="code_security_verifier",
         model=model,
@@ -217,7 +244,7 @@ def _build_verifier_agent(model: str) -> Agent:
     )
 
 
-def _build_repo_synthesis_agent(model: str) -> Agent:
+def _build_repo_synthesis_agent(model: Gemini) -> Agent:
     return Agent(
         name="code_repo_synthesizer",
         model=model,
@@ -230,6 +257,10 @@ def _build_repo_synthesis_agent(model: str) -> Agent:
 def _detect_language(file_path: str) -> str:
     _, ext = os.path.splitext(file_path)
     return LANGUAGE_BY_EXTENSION.get(ext.lower(), "text")
+
+
+def _build_llm_model(model_name: str, api_key: str) -> ScopedGemini:
+    return ScopedGemini(model=model_name, api_key=api_key)
 
 
 def _extract_imports(file_path: str, content: str) -> list[str]:
@@ -513,6 +544,7 @@ def _run_structured_agent(
     service_name: str,
     user_id: int | None,
     model_name: str,
+    api_key: str,
     code_stream_meta: dict | None = None,
 ) -> tuple[BaseModel, dict[str, int], str]:
     from cyberlens.utils import clean_json_response, log_gemini_call
@@ -582,7 +614,16 @@ def _run_structured_agent(
             text_preview=response_text,
         )
 
-        parsed = schema_cls.model_validate_json(clean_json_response(response_text))
+        cleaned = clean_json_response(response_text)
+        if not cleaned:
+            logger.warning(
+                "%s returned empty response for scan %s, using defaults",
+                service_name,
+                scan.id,
+            )
+            parsed = schema_cls()
+        else:
+            parsed = schema_cls.model_validate_json(cleaned)
         duration_ms = int((time.time() - start_time) * 1000)
         log_gemini_call(
             user_id=user_id,
@@ -604,7 +645,7 @@ def _run_structured_agent(
         duration_ms = int((time.time() - start_time) * 1000)
         error_info = _classify_adk_error(exc)
         api_probe = (
-            probe_gemini_api_connection(os.environ.get("GOOGLE_API_KEY", ""))
+            probe_gemini_api_connection(api_key)
             if error_info["should_probe"]
             else None
         )
@@ -682,6 +723,7 @@ def _summarize_chunks(
     file_indexes: list[CodeScanFileIndex],
     user_id: int | None,
     model_name: str,
+    api_key: str,
     totals: dict[str, int],
 ) -> list[CodeScanChunk]:
     stage_started_at = timezone.now()
@@ -696,7 +738,7 @@ def _summarize_chunks(
     )
     update_scan_phase(scan, AdkTraceEvent.Phase.CHUNK_SUMMARY)
 
-    agent = _build_chunk_summary_agent(model_name)
+    agent = _build_chunk_summary_agent(_build_llm_model(model_name, api_key))
     created_chunks: list[CodeScanChunk] = []
     suspicious_chunks = 0
     files_scanned = 0
@@ -763,6 +805,7 @@ def _summarize_chunks(
                 service_name="code_scan_chunk_summary",
                 user_id=user_id,
                 model_name=model_name,
+                api_key=api_key,
                 code_stream_meta={
                     "file_path": file_info.path,
                     "file_index": file_index,
@@ -906,6 +949,7 @@ def _generate_candidates(
     chunks: list[CodeScanChunk],
     user_id: int | None,
     model_name: str,
+    api_key: str,
     totals: dict[str, int],
 ) -> list[CodeScanCandidate]:
     stage_started_at = timezone.now()
@@ -920,7 +964,7 @@ def _generate_candidates(
     )
     update_scan_phase(scan, AdkTraceEvent.Phase.CANDIDATE_GENERATION)
 
-    agent = _build_candidate_agent(model_name)
+    agent = _build_candidate_agent(_build_llm_model(model_name, api_key))
     batches = _batch(_candidate_input_from_chunks(chunks), SUMMARY_BATCH_SIZE)
     deduped: dict[tuple[str, tuple[str, ...]], dict] = {}
     total_batches = len(batches) * len(RISK_PASSES)
@@ -962,6 +1006,7 @@ def _generate_candidates(
                 service_name="code_scan_candidate_generation",
                 user_id=user_id,
                 model_name=model_name,
+                api_key=api_key,
             )
             _accumulate_totals(totals, metrics)
             _publish_token_update(scan, totals)
@@ -1234,6 +1279,7 @@ def _verify_candidates(
     evidence_packs: list[dict],
     user_id: int | None,
     model_name: str,
+    api_key: str,
     totals: dict[str, int],
 ) -> int:
     stage_started_at = timezone.now()
@@ -1249,7 +1295,7 @@ def _verify_candidates(
     update_scan_phase(scan, AdkTraceEvent.Phase.VERIFICATION)
 
     evidence_by_candidate = {pack["candidate_id"]: pack for pack in evidence_packs}
-    agent = _build_verifier_agent(model_name)
+    agent = _build_verifier_agent(_build_llm_model(model_name, api_key))
     verified_count = 0
     reviewed_candidates = 0
     rejected_count = 0
@@ -1320,6 +1366,7 @@ def _verify_candidates(
             service_name="code_scan_verification",
             user_id=user_id,
             model_name=model_name,
+            api_key=api_key,
         )
         _accumulate_totals(totals, metrics)
         _update_scan_token_totals(scan, totals, files_scanned=scan.code_scan_files_scanned)
@@ -1439,6 +1486,7 @@ def _run_repo_synthesis(
     verified_count: int,
     user_id: int | None,
     model_name: str,
+    api_key: str,
     totals: dict[str, int],
 ) -> None:
     stage_started_at = timezone.now()
@@ -1453,7 +1501,7 @@ def _run_repo_synthesis(
     )
     update_scan_phase(scan, AdkTraceEvent.Phase.REPO_SYNTHESIS)
 
-    agent = _build_repo_synthesis_agent(model_name)
+    agent = _build_repo_synthesis_agent(_build_llm_model(model_name, api_key))
     findings = list(scan.code_findings.order_by("id"))
     record_phase_metric(
         scan,
@@ -1497,6 +1545,7 @@ def _run_repo_synthesis(
         service_name="code_scan_repo_synthesis",
         user_id=user_id,
         model_name=model_name,
+        api_key=api_key,
     )
     _accumulate_totals(totals, metrics)
     _update_scan_token_totals(scan, totals, files_scanned=scan.code_scan_files_scanned)
@@ -1556,6 +1605,7 @@ def _run_code_scan_pipeline(
     source_files: dict[str, str],
     user_id: int | None,
     model_name: str,
+    api_key: str,
 ) -> None:
     scan = GitHubScan.objects.get(id=scan_id)
     scan.code_scan_files_total = len(source_files)
@@ -1639,6 +1689,7 @@ def _run_code_scan_pipeline(
         file_indexes=file_indexes,
         user_id=user_id,
         model_name=model_name,
+        api_key=api_key,
         totals=totals,
     )
     candidates = _generate_candidates(
@@ -1646,6 +1697,7 @@ def _run_code_scan_pipeline(
         chunks=chunks,
         user_id=user_id,
         model_name=model_name,
+        api_key=api_key,
         totals=totals,
     )
     evidence_packs = _build_evidence_packs(
@@ -1660,6 +1712,7 @@ def _run_code_scan_pipeline(
         evidence_packs=evidence_packs,
         user_id=user_id,
         model_name=model_name,
+        api_key=api_key,
         totals=totals,
     )
     _run_repo_synthesis(
@@ -1668,6 +1721,7 @@ def _run_code_scan_pipeline(
         verified_count=verified_count,
         user_id=user_id,
         model_name=model_name,
+        api_key=api_key,
         totals=totals,
     )
 
@@ -1722,7 +1776,6 @@ def scan_code_security_github(
         )
         return
 
-    os.environ["GOOGLE_API_KEY"] = api_key
     source_files = get_github_source_files(pat, repo_full_name)
     if not source_files:
         logger.info("No source files found in GitHub repo for code security scan")
@@ -1735,7 +1788,13 @@ def scan_code_security_github(
         )
         return
 
-    _run_code_scan_pipeline(scan_id, source_files, user_id=user_id, model_name=model_name)
+    _run_code_scan_pipeline(
+        scan_id,
+        source_files,
+        user_id=user_id,
+        model_name=model_name,
+        api_key=api_key,
+    )
 
 
 def scan_code_security(scan_id: int, dir_path: str, user_id: int | None = None) -> None:
@@ -1772,8 +1831,6 @@ def scan_code_security(scan_id: int, dir_path: str, user_id: int | None = None) 
         )
         return
 
-    os.environ["GOOGLE_API_KEY"] = api_key
-
     try:
         source_files = get_local_source_files(dir_path)
     except (ValueError, FileNotFoundError) as exc:
@@ -1797,4 +1854,10 @@ def scan_code_security(scan_id: int, dir_path: str, user_id: int | None = None) 
         )
         return
 
-    _run_code_scan_pipeline(scan_id, source_files, user_id=user_id, model_name=model_name)
+    _run_code_scan_pipeline(
+        scan_id,
+        source_files,
+        user_id=user_id,
+        model_name=model_name,
+        api_key=api_key,
+    )

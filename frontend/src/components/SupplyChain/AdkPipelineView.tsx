@@ -646,6 +646,153 @@ export default function AdkPipelineView({
         </div>
 
         <div
+          className="adk-pipeline-activity-grid"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(320px, 1fr) minmax(320px, 1fr)",
+            gap: 16,
+            marginBottom: 16,
+          }}
+        >
+          <div className="card" style={{ padding: 18 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--md-on-surface)", marginBottom: 10 }}>
+              Agent Activity
+            </div>
+            {!latestAgentEvent ? (
+              <div style={{ fontSize: 12, color: "var(--md-on-surface-variant)" }}>
+                No agent activity yet.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div
+                  style={{
+                    padding: 14,
+                    borderRadius: 12,
+                    background: statusSurface(latestAgentEvent.status),
+                    border: `1px solid ${statusColor(latestAgentEvent.status)}22`,
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "var(--md-on-surface)" }}>
+                    {latestAgentEvent.label || PHASE_LABELS[latestAgentEvent.phase]}
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 12, color: "var(--md-on-surface-variant)" }}>
+                    {PHASE_LABELS[latestAgentEvent.phase]} · {latestAgentEvent.kind} ·{" "}
+                    {formatTimestamp(latestAgentEvent.created_at)}
+                  </div>
+                  {(latestAgentEvent.text_preview ||
+                    readString(
+                      isRecord(latestAgentEvent.payload_json) ? latestAgentEvent.payload_json : null,
+                      "detail"
+                    ) ||
+                    readString(
+                      isRecord(latestAgentEvent.payload_json) ? latestAgentEvent.payload_json : null,
+                      "error_message"
+                    )) && (
+                    <div
+                      style={{
+                        marginTop: 10,
+                        fontSize: 13,
+                        color: "var(--md-on-surface)",
+                        lineHeight: 1.6,
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                      }}
+                    >
+                      {latestAgentEvent.text_preview ||
+                        readString(
+                          isRecord(latestAgentEvent.payload_json) ? latestAgentEvent.payload_json : null,
+                          "detail"
+                        ) ||
+                        readString(
+                          isRecord(latestAgentEvent.payload_json) ? latestAgentEvent.payload_json : null,
+                          "error_message"
+                        )}
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {recentAgentEvents.map((event) => (
+                    <button
+                      key={event.id}
+                      type="button"
+                      onClick={() => setSelectedEventId(event.id)}
+                      style={{
+                        border: "1px solid var(--md-outline-variant)",
+                        background: "var(--md-surface-container)",
+                        borderRadius: 10,
+                        padding: "10px 12px",
+                        textAlign: "left",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--md-on-surface)" }}>
+                        {event.label}
+                      </div>
+                      <div style={{ marginTop: 4, fontSize: 11, color: "var(--md-on-surface-variant)" }}>
+                        {PHASE_LABELS[event.phase]} · {event.kind} · #{event.sequence}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="card" style={{ padding: 18 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--md-on-surface)", marginBottom: 10 }}>
+              Live Token Usage
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+                gap: 10,
+              }}
+            >
+              <MetricPill
+                label="Input"
+                value={(
+                  liveTokenEvent?.input_tokens ??
+                  scan?.code_scan_input_tokens ??
+                  0
+                ).toLocaleString()}
+              />
+              <MetricPill
+                label="Output"
+                value={(
+                  liveTokenEvent?.output_tokens ??
+                  scan?.code_scan_output_tokens ??
+                  0
+                ).toLocaleString()}
+              />
+              <MetricPill
+                label="Total"
+                value={(
+                  liveTokenEvent?.total_tokens ??
+                  scan?.code_scan_total_tokens ??
+                  0
+                ).toLocaleString()}
+              />
+              <MetricPill
+                label="Files"
+                value={`${scan?.code_scan_files_scanned ?? 0}/${scan?.code_scan_files_total ?? 0}`}
+              />
+            </div>
+            <div
+              style={{
+                marginTop: 12,
+                fontSize: 12,
+                color: "var(--md-on-surface-variant)",
+                lineHeight: 1.6,
+              }}
+            >
+              Token totals refresh after each ADK call completes. If the counters stay at zero, inspect the latest
+              warning or error to see whether the agent was skipped before any model call started.
+            </div>
+          </div>
+        </div>
+
+        <div
           style={{
             padding: 16,
             borderRadius: 16,
@@ -844,152 +991,6 @@ export default function AdkPipelineView({
               </div>
             );
           })}
-        </div>
-      </div>
-
-      <div
-        className="adk-pipeline-activity-grid"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(320px, 1fr) minmax(320px, 1fr)",
-          gap: 16,
-        }}
-      >
-        <div className="card" style={{ padding: 18 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--md-on-surface)", marginBottom: 10 }}>
-            Agent Activity
-          </div>
-          {!latestAgentEvent ? (
-            <div style={{ fontSize: 12, color: "var(--md-on-surface-variant)" }}>
-              No agent activity yet.
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div
-                style={{
-                  padding: 14,
-                  borderRadius: 12,
-                  background: statusSurface(latestAgentEvent.status),
-                  border: `1px solid ${statusColor(latestAgentEvent.status)}22`,
-                }}
-              >
-                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--md-on-surface)" }}>
-                  {latestAgentEvent.label || PHASE_LABELS[latestAgentEvent.phase]}
-                </div>
-                <div style={{ marginTop: 6, fontSize: 12, color: "var(--md-on-surface-variant)" }}>
-                  {PHASE_LABELS[latestAgentEvent.phase]} · {latestAgentEvent.kind} ·{" "}
-                  {formatTimestamp(latestAgentEvent.created_at)}
-                </div>
-                {(latestAgentEvent.text_preview ||
-                  readString(
-                    isRecord(latestAgentEvent.payload_json) ? latestAgentEvent.payload_json : null,
-                    "detail"
-                  ) ||
-                  readString(
-                    isRecord(latestAgentEvent.payload_json) ? latestAgentEvent.payload_json : null,
-                    "error_message"
-                  )) && (
-                  <div
-                    style={{
-                      marginTop: 10,
-                      fontSize: 13,
-                      color: "var(--md-on-surface)",
-                      lineHeight: 1.6,
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {latestAgentEvent.text_preview ||
-                      readString(
-                        isRecord(latestAgentEvent.payload_json) ? latestAgentEvent.payload_json : null,
-                        "detail"
-                      ) ||
-                      readString(
-                        isRecord(latestAgentEvent.payload_json) ? latestAgentEvent.payload_json : null,
-                        "error_message"
-                      )}
-                  </div>
-                )}
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {recentAgentEvents.map((event) => (
-                  <button
-                    key={event.id}
-                    type="button"
-                    onClick={() => setSelectedEventId(event.id)}
-                    style={{
-                      border: "1px solid var(--md-outline-variant)",
-                      background: "var(--md-surface-container)",
-                      borderRadius: 10,
-                      padding: "10px 12px",
-                      textAlign: "left",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--md-on-surface)" }}>
-                      {event.label}
-                    </div>
-                    <div style={{ marginTop: 4, fontSize: 11, color: "var(--md-on-surface-variant)" }}>
-                      {PHASE_LABELS[event.phase]} · {event.kind} · #{event.sequence}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="card" style={{ padding: 18 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--md-on-surface)", marginBottom: 10 }}>
-            Live Token Usage
-          </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
-              gap: 10,
-            }}
-          >
-            <MetricPill
-              label="Input"
-              value={(
-                liveTokenEvent?.input_tokens ??
-                scan?.code_scan_input_tokens ??
-                0
-              ).toLocaleString()}
-            />
-            <MetricPill
-              label="Output"
-              value={(
-                liveTokenEvent?.output_tokens ??
-                scan?.code_scan_output_tokens ??
-                0
-              ).toLocaleString()}
-            />
-            <MetricPill
-              label="Total"
-              value={(
-                liveTokenEvent?.total_tokens ??
-                scan?.code_scan_total_tokens ??
-                0
-              ).toLocaleString()}
-            />
-            <MetricPill
-              label="Files"
-              value={`${scan?.code_scan_files_scanned ?? 0}/${scan?.code_scan_files_total ?? 0}`}
-            />
-          </div>
-          <div
-            style={{
-              marginTop: 12,
-              fontSize: 12,
-              color: "var(--md-on-surface-variant)",
-              lineHeight: 1.6,
-            }}
-          >
-            Token totals refresh after each ADK call completes. If the counters stay at zero, inspect the latest
-            warning or error to see whether the agent was skipped before any model call started.
-          </div>
         </div>
       </div>
 

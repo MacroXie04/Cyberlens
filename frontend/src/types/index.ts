@@ -79,6 +79,8 @@ export interface GitHubScan {
   total_deps: number;
   vulnerable_deps: number;
   security_score: number;
+  dependency_score: number;
+  code_security_score: number;
   scanned_at: string;
   code_scan_input_tokens: number;
   code_scan_output_tokens: number;
@@ -87,6 +89,7 @@ export interface GitHubScan {
   code_scan_files_total: number;
   code_scan_phase?: string;
   code_scan_stats_json?: Record<string, unknown>;
+  error_message?: string;
   dependencies?: Dependency[];
   code_findings?: CodeFinding[];
 }
@@ -285,6 +288,7 @@ export interface GcpEstateSummary {
   total_events_recent: number;
   total_services: number;
   unhealthy_revisions: number;
+  collection_errors?: Record<string, string>;
 }
 
 export interface GcpObservedService {

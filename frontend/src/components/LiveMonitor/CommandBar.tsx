@@ -11,6 +11,7 @@ interface Props {
   timeRange: number;
   socketConnected: boolean;
   lastSync: string | null;
+  refreshing?: boolean;
   onRegionChange: (v: string) => void;
   onServiceChange: (v: string) => void;
   onSourceChange: (v: string) => void;
@@ -67,6 +68,7 @@ export default function CommandBar({
   timeRange,
   socketConnected,
   lastSync,
+  refreshing,
   onRegionChange,
   onServiceChange,
   onSourceChange,
@@ -201,17 +203,19 @@ export default function CommandBar({
       {/* Refresh */}
       <button
         onClick={onRefresh}
+        disabled={refreshing}
         style={{
           background: "transparent",
-          color: socColors.accent,
+          color: refreshing ? socColors.textDim : socColors.accent,
           border: `1px solid ${socColors.border}`,
           borderRadius: 6,
           padding: "4px 10px",
           fontSize: 12,
-          cursor: "pointer",
+          cursor: refreshing ? "not-allowed" : "pointer",
+          opacity: refreshing ? 0.6 : 1,
         }}
       >
-        Refresh
+        {refreshing ? "Refreshing\u2026" : "Refresh"}
       </button>
     </div>
   );

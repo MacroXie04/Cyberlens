@@ -1,8 +1,9 @@
 import { useRef, useEffect, useState, useCallback } from "react";
-import type { CodeScanStreamEvent } from "../../types";
+import type { AdkTraceEvent, CodeScanStreamEvent } from "../../types";
 
 interface Props {
   streamEvents: CodeScanStreamEvent[];
+  agentRequests?: AdkTraceEvent[];
 }
 
 interface FileStatus {
@@ -11,16 +12,13 @@ interface FileStatus {
   findingsCount?: number;
 }
 
-export default function CodeScanLiveView({ streamEvents }: Props) {
+export default function CodeScanLiveView({ streamEvents, agentRequests }: Props) {
   const outputRef = useRef<HTMLDivElement>(null);
   const [aiOutput, setAiOutput] = useState("");
   const [files, setFiles] = useState<FileStatus[]>([]);
   const [currentFile, setCurrentFile] = useState("");
-  const [currentActivity, setCurrentActivity] = useState("Waiting for code scan to start...");
-  const [warningMessage, setWarningMessage] = useState("");
   const [fileIndex, setFileIndex] = useState(0);
   const [totalFiles, setTotalFiles] = useState(0);
-  const [tokens, setTokens] = useState({ input: 0, output: 0, total: 0 });
   const [filesScanned, setFilesScanned] = useState(0);
 
   // Batch chunk text updates via requestAnimationFrame
@@ -49,19 +47,13 @@ export default function CodeScanLiveView({ streamEvents }: Props) {
           setAiOutput("");
           setFiles([]);
           setCurrentFile("");
-          setCurrentActivity("Preparing code scan pipeline...");
-          setWarningMessage("");
           setFileIndex(0);
-          setTokens({ input: 0, output: 0, total: 0 });
           setFilesScanned(0);
           break;
 
         case "file_start":
           setCurrentFile(event.file_path || "");
           setFileIndex(event.file_index || 0);
-          setCurrentActivity(
-            event.file_path ? `Agent is analyzing ${event.file_path}` : "Agent is analyzing a file"
-          );
           setAiOutput("");
           setFiles((prev) => {
             const exists = prev.find((f) => f.path === event.file_path);
@@ -75,9 +67,6 @@ export default function CodeScanLiveView({ streamEvents }: Props) {
           break;
 
         case "chunk":
-          setCurrentActivity(
-            currentFile ? `Agent reasoning over ${currentFile}` : "Agent is reasoning over code"
-          );
           pendingChunksRef.current.push(event.text || "");
           if (rafIdRef.current === null) {
             rafIdRef.current = requestAnimationFrame(flushChunks);
@@ -85,11 +74,6 @@ export default function CodeScanLiveView({ streamEvents }: Props) {
           break;
 
         case "file_complete":
-          setCurrentActivity(
-            event.file_path
-              ? `Completed ${event.file_path}`
-              : "Completed current file analysis"
-          );
           setFiles((prev) =>
             prev.map((f) =>
               f.path === event.file_path
@@ -100,10 +84,6 @@ export default function CodeScanLiveView({ streamEvents }: Props) {
           break;
 
         case "file_error":
-          setCurrentActivity(
-            event.file_path ? `Failed while analyzing ${event.file_path}` : "File analysis failed"
-          );
-          setWarningMessage(event.error || "File analysis failed");
           setFiles((prev) =>
             prev.map((f) =>
               f.path === event.file_path ? { ...f, status: "error" as const } : f
@@ -112,36 +92,16 @@ export default function CodeScanLiveView({ streamEvents }: Props) {
           break;
 
         case "token_update":
-          setCurrentActivity("Updating token usage and scan progress...");
-          setTokens({
-            input: event.input_tokens ?? 0,
-            output: event.output_tokens ?? 0,
-            total: event.total_tokens ?? 0,
-          });
           setFilesScanned(event.files_scanned ?? 0);
           break;
 
         case "scan_summary":
-          setCurrentActivity(event.message || "Code scan stage finished");
-          setTokens({
-            input: event.input_tokens ?? 0,
-            output: event.output_tokens ?? 0,
-            total: event.total_tokens ?? 0,
-          });
           setFilesScanned((prev) => event.files_scanned ?? prev);
           setCurrentFile("");
-          if (event.message) {
-            setWarningMessage(event.message);
-          }
-          break;
-
-        case "warning":
-          setCurrentActivity(event.message || "Agent reported a warning");
-          setWarningMessage(event.message || event.error || "Code scan warning");
           break;
       }
     }
-  }, [streamEvents, flushChunks, currentFile]);
+  }, [streamEvents, flushChunks]);
 
   // Auto-scroll AI output
   useEffect(() => {
@@ -236,83 +196,6 @@ export default function CodeScanLiveView({ streamEvents }: Props) {
             transition: "width 0.3s ease",
           }}
         />
-      </div>
-
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 16,
-          fontSize: 12,
-          color: "var(--md-on-surface-variant)",
-          padding: "10px 12px",
-          background: "var(--md-surface-container-high)",
-          borderRadius: 8,
-          marginBottom: 16,
-        }}
-      >
-        <span style={{ fontWeight: 500, color: "var(--md-on-surface)" }}>Live token usage</span>
-        <span>
-          <strong style={{ color: "var(--md-on-surface)" }}>
-            {tokens.input.toLocaleString()}
-          </strong>{" "}
-          input
-        </span>
-        <span>
-          <strong style={{ color: "var(--md-on-surface)" }}>
-            {tokens.output.toLocaleString()}
-          </strong>{" "}
-          output
-        </span>
-        <span>
-          <strong style={{ color: "var(--md-on-surface)" }}>
-            {tokens.total.toLocaleString()}
-          </strong>{" "}
-          total
-        </span>
-        {totalFiles > 0 && (
-          <span>
-            <strong style={{ color: "var(--md-on-surface)" }}>{filesScanned}</strong>/
-            {totalFiles} files
-          </span>
-        )}
-      </div>
-
-      <div
-        style={{
-          padding: "10px 12px",
-          borderRadius: 8,
-          background: "var(--md-surface-container)",
-          marginBottom: 16,
-        }}
-      >
-        <div
-          style={{
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: 0.6,
-            textTransform: "uppercase",
-            color: "var(--md-primary)",
-            marginBottom: 6,
-          }}
-        >
-          Agent Activity
-        </div>
-        <div style={{ fontSize: 13, color: "var(--md-on-surface)", lineHeight: 1.5 }}>
-          {currentActivity}
-        </div>
-        {warningMessage && (
-          <div
-            style={{
-              marginTop: 10,
-              fontSize: 12,
-              color: "var(--md-warning)",
-              lineHeight: 1.5,
-            }}
-          >
-            {warningMessage}
-          </div>
-        )}
       </div>
 
       {/* AI output stream */}
@@ -411,11 +294,98 @@ export default function CodeScanLiveView({ streamEvents }: Props) {
         </div>
       )}
 
+      {/* Recent agent requests */}
+      {agentRequests && agentRequests.length > 0 && (
+        <AgentRequestsCompact requests={agentRequests} />
+      )}
+
       <style>{`
         @keyframes blink {
           50% { opacity: 0; }
         }
       `}</style>
+    </div>
+  );
+}
+
+function AgentRequestsCompact({ requests }: { requests: AdkTraceEvent[] }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const recent = requests.slice(-10);
+
+  return (
+    <div>
+      <button
+        onClick={() => setCollapsed(!collapsed)}
+        style={{
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          fontSize: 12,
+          fontWeight: 500,
+          color: "var(--md-on-surface-variant)",
+          padding: "4px 0",
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+        }}
+      >
+        <span style={{ fontSize: 10 }}>{collapsed ? "\u25B6" : "\u25BC"}</span>
+        Recent LLM calls ({requests.length})
+      </button>
+      {!collapsed && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 3,
+            marginTop: 6,
+          }}
+        >
+          {recent.map((req) => (
+            <div
+              key={req.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 11,
+                padding: "4px 8px",
+                borderRadius: 6,
+                background: "var(--md-surface-container)",
+                color: "var(--md-on-surface-variant)",
+              }}
+            >
+              <span
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: "50%",
+                  background:
+                    req.status === "error" ? "var(--md-error)" : "var(--md-safe)",
+                  flexShrink: 0,
+                }}
+              />
+              <span
+                style={{
+                  flex: 1,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  color: "var(--md-on-surface)",
+                }}
+              >
+                {req.label}
+              </span>
+              <span style={{ fontFamily: "var(--md-font-mono)", flexShrink: 0 }}>
+                {req.total_tokens.toLocaleString()} tok
+              </span>
+              <span style={{ fontFamily: "var(--md-font-mono)", flexShrink: 0 }}>
+                {(req.duration_ms / 1000).toFixed(1)}s
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

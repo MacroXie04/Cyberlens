@@ -6,6 +6,12 @@ import logging
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 
+from .gcp_errors import (
+    GcpCollectionError,
+    build_gcp_error_message,
+    extract_http_error_message,
+)
+
 logger = logging.getLogger(__name__)
 
 CLOUD_RUN_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
@@ -51,8 +57,19 @@ def discover_services(
 
         resp = http.get(url, headers=headers, params=params, timeout=30)
         if resp.status_code != 200:
-            logger.error("Cloud Run API error %s: %s", resp.status_code, resp.text[:500])
-            break
+            detail = extract_http_error_message(resp)
+            logger.error("Cloud Run API error %s: %s", resp.status_code, detail)
+            raise GcpCollectionError(
+                build_gcp_error_message(
+                    "Cloud Run service discovery",
+                    message=detail,
+                    status_code=resp.status_code,
+                    hint=(
+                        "Enable the Cloud Run Admin API and grant the service "
+                        "account roles/run.viewer."
+                    ),
+                )
+            )
 
         data = resp.json()
 

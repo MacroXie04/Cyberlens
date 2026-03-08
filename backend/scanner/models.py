@@ -31,6 +31,8 @@ class GitHubScan(models.Model):
     total_deps = models.IntegerField(default=0)
     vulnerable_deps = models.IntegerField(default=0)
     security_score = models.IntegerField(default=100)
+    dependency_score = models.IntegerField(default=100)
+    code_security_score = models.IntegerField(default=100)
     code_scan_input_tokens = models.IntegerField(default=0)
     code_scan_output_tokens = models.IntegerField(default=0)
     code_scan_total_tokens = models.IntegerField(default=0)
@@ -38,6 +40,7 @@ class GitHubScan(models.Model):
     code_scan_files_total = models.IntegerField(default=0)
     code_scan_phase = models.CharField(max_length=50, blank=True, default="")
     code_scan_stats_json = models.JSONField(default=dict)
+    error_message = models.TextField(blank=True, default="")
     scanned_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

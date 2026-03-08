@@ -86,7 +86,7 @@ export default function TriageDrawer({
         zIndex: 100,
         display: "flex",
         flexDirection: "column",
-        boxShadow: "-4px 0 24px rgba(0,0,0,0.5)",
+        boxShadow: "-4px 0 24px rgba(0,0,0,0.1)",
       }}
     >
       {/* Header */}
@@ -202,7 +202,7 @@ export default function TriageDrawer({
                 <span style={{ color: socColors.textDim }}>Confidence:</span>
                 <br />
                 <span style={{ color: socColors.text }}>
-                  {(incident.confidence * 100).toFixed(0)}%
+                  {((incident.confidence ?? 0) * 100).toFixed(0)}%
                 </span>
               </div>
             </div>

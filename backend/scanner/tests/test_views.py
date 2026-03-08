@@ -1,7 +1,9 @@
 import pytest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+from django.test import override_settings
 from rest_framework.test import APIClient
 from scanner.models import AdkTraceEvent, GitHubScan, AiReport
+from scanner.views import _dispatch_background_task, _run_eager_task_in_thread
 
 
 @pytest.fixture
@@ -64,14 +66,15 @@ class TestScan:
         resp = api_client.post("/api/github/scan/", {}, format="json")
         assert resp.status_code == 400
 
-    @patch("scanner.services.osv_scanner.run_full_scan")
     @patch("scanner.views.validate_token", return_value={"login": "u", "avatar_url": "", "name": "U"})
-    def test_success(self, mock_validate, mock_run, api_client):
-        mock_run.delay = lambda *a, **kw: None
+    @patch("scanner.views._dispatch_background_task")
+    def test_success(self, mock_dispatch, mock_validate, api_client):
         api_client.post("/api/github/connect/", {"token": "ghp_valid"}, format="json")
         resp = api_client.post("/api/github/scan/", {"repo": "owner/repo"}, format="json")
         assert resp.status_code == 202
         assert GitHubScan.objects.count() == 1
+        scan = GitHubScan.objects.get()
+        assert mock_dispatch.call_args.args[1] == scan.id
 
 
 @pytest.mark.django_db
@@ -199,3 +202,31 @@ class TestUnauthenticated:
         client = APIClient()
         resp = client.get("/api/settings/")
         assert resp.status_code == 403
+
+
+class TestDispatchBackgroundTask:
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=True)
+    @patch("scanner.views.threading.Thread")
+    def test_eager_mode_uses_background_thread(self, mock_thread_cls):
+        task = Mock()
+        task.name = "scanner.services.osv_scanner.run_full_scan"
+
+        _dispatch_background_task(task, 1, "ghp_test", "owner/repo", user_id=7)
+
+        mock_thread_cls.assert_called_once_with(
+            target=_run_eager_task_in_thread,
+            args=(task, (1, "ghp_test", "owner/repo"), {"user_id": 7}),
+            daemon=True,
+            name="scanner.services.osv_scanner.run_full_scan-thread",
+        )
+        mock_thread_cls.return_value.start.assert_called_once()
+        task.delay.assert_not_called()
+
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=False)
+    def test_non_eager_uses_celery_delay(self):
+        task = Mock()
+        task.name = "scanner.services.osv_scanner.run_full_scan"
+
+        _dispatch_background_task(task, 1, "ghp_test", "owner/repo", user_id=7)
+
+        task.delay.assert_called_once_with(1, "ghp_test", "owner/repo", user_id=7)

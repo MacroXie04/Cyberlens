@@ -18,6 +18,7 @@ urlpatterns = [
     path("gcp-estate/services/", views.gcp_estate_services, name="gcp-estate-services"),
     path("gcp-estate/timeseries/", views.gcp_estate_timeseries, name="gcp-estate-timeseries"),
     path("gcp-estate/refresh/", views.gcp_trigger_refresh, name="gcp-estate-refresh"),
+    path("gcp-estate/ensure-collection/", views.gcp_ensure_collection, name="gcp-ensure-collection"),
     # GCP Security
     path("gcp-security/events/", views.gcp_security_events, name="gcp-security-events"),
     path("gcp-security/incidents/", views.gcp_security_incidents, name="gcp-security-incidents"),

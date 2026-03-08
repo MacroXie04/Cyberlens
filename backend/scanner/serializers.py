@@ -66,6 +66,8 @@ class GitHubScanSerializer(serializers.ModelSerializer):
             "total_deps",
             "vulnerable_deps",
             "security_score",
+            "dependency_score",
+            "code_security_score",
             "scanned_at",
             "dependencies",
             "code_findings",
@@ -76,6 +78,7 @@ class GitHubScanSerializer(serializers.ModelSerializer):
             "code_scan_files_total",
             "code_scan_phase",
             "code_scan_stats_json",
+            "error_message",
         ]
 
 
@@ -91,8 +94,11 @@ class GitHubScanListSerializer(serializers.ModelSerializer):
             "total_deps",
             "vulnerable_deps",
             "security_score",
+            "dependency_score",
+            "code_security_score",
             "code_scan_phase",
             "scanned_at",
+            "error_message",
         ]
 
 

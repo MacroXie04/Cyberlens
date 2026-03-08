@@ -5,6 +5,7 @@ interface Props {
   services: GcpObservedService[];
   selectedService: string;
   onSelectService: (name: string) => void;
+  emptyStateMessage?: string;
 }
 
 function riskColor(score: number): string {
@@ -25,6 +26,7 @@ export default function EstateMatrix({
   services,
   selectedService,
   onSelectService,
+  emptyStateMessage,
 }: Props) {
   if (services.length === 0) {
     return (
@@ -39,7 +41,7 @@ export default function EstateMatrix({
           textAlign: "center",
         }}
       >
-        No Cloud Run services discovered. Configure GCP settings and refresh.
+        {emptyStateMessage || "No Cloud Run services discovered. Configure GCP settings and refresh."}
       </div>
     );
   }
@@ -137,19 +139,19 @@ export default function EstateMatrix({
                   {svc.latest_revision?.split("-").pop() || "—"}
                 </td>
                 <td style={{ padding: "8px 12px", fontVariantNumeric: "tabular-nums" }}>
-                  {svc.instance_count}
+                  {svc.instance_count ?? 0}
                 </td>
                 <td style={{ padding: "8px 12px", fontVariantNumeric: "tabular-nums" }}>
-                  {svc.request_rate.toFixed(1)}
+                  {(svc.request_rate ?? 0).toFixed(1)}
                 </td>
-                <td style={{ padding: "8px 12px", color: errorColor(svc.error_rate) }}>
-                  {(svc.error_rate * 100).toFixed(1)}%
-                </td>
-                <td style={{ padding: "8px 12px", fontVariantNumeric: "tabular-nums" }}>
-                  {svc.p50_latency_ms.toFixed(0)}ms
+                <td style={{ padding: "8px 12px", color: errorColor(svc.error_rate ?? 0) }}>
+                  {((svc.error_rate ?? 0) * 100).toFixed(1)}%
                 </td>
                 <td style={{ padding: "8px 12px", fontVariantNumeric: "tabular-nums" }}>
-                  {svc.p95_latency_ms.toFixed(0)}ms
+                  {(svc.p50_latency_ms ?? 0).toFixed(0)}ms
+                </td>
+                <td style={{ padding: "8px 12px", fontVariantNumeric: "tabular-nums" }}>
+                  {(svc.p95_latency_ms ?? 0).toFixed(0)}ms
                 </td>
                 <td style={{ padding: "8px 12px" }}>
                   <div
@@ -164,9 +166,9 @@ export default function EstateMatrix({
                   >
                     <div
                       style={{
-                        width: `${Math.min(100, svc.risk_score * 100)}%`,
+                        width: `${Math.min(100, (svc.risk_score ?? 0) * 100)}%`,
                         height: "100%",
-                        background: riskColor(svc.risk_score),
+                        background: riskColor(svc.risk_score ?? 0),
                         borderRadius: 3,
                       }}
                     />

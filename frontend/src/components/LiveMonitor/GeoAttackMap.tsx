@@ -68,7 +68,7 @@ export default function GeoAttackMap({ data }: Props) {
         .data((countries as any).features)
         .join("path")
         .attr("d", pathGen as never)
-        .attr("fill", "#14202e")
+        .attr("fill", "#e2e8f0")
         .attr("stroke", socColors.border)
         .attr("stroke-width", 0.4);
 

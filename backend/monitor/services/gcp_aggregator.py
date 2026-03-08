@@ -38,6 +38,39 @@ DEFAULT_SOURCES = [
     "iap",
 ]
 
+_NOT_CONFIGURED_MSG = (
+    "GCP not configured \u2014 set project ID and service account key in Settings"
+)
+
+
+# ---------------------------------------------------------------------------
+# Collection error helpers — write per-source errors to cache so the frontend
+# can surface actionable messages instead of showing a blank dashboard.
+# ---------------------------------------------------------------------------
+
+def _collection_errors_key(user_id: int) -> str:
+    return f"gcp_collection_errors:{user_id}"
+
+
+def _set_collection_error(user_id: int, source: str, message: str):
+    key = _collection_errors_key(user_id)
+    errors = cache.get(key) or {}
+    errors[source] = message
+    cache.set(key, errors, timeout=120)
+
+
+def _clear_collection_error(user_id: int, source: str):
+    key = _collection_errors_key(user_id)
+    errors = cache.get(key)
+    if errors and source in errors:
+        del errors[source]
+        cache.set(key, errors, timeout=120)
+
+
+def get_collection_errors(user_id: int) -> dict:
+    """Return the current collection error dict (used by views)."""
+    return cache.get(_collection_errors_key(user_id)) or {}
+
 
 def _get_gcp_config(user):
     """Get GCP config from user settings. Returns None if not configured."""
@@ -86,6 +119,7 @@ def gcp_fetch_logs(user_id: int):
 
     config = _get_gcp_config(user)
     if not config:
+        _set_collection_error(user_id, "logs", _NOT_CONFIGURED_MSG)
         return
 
     enabled = config["enabled_sources"]
@@ -96,6 +130,7 @@ def gcp_fetch_logs(user_id: int):
     from monitor.services import gcp_log_fetcher, gcp_event_parser
 
     all_events = []
+    had_error = False
 
     # Cloud Run Logs
     if "cloud_run_logs" in enabled:
@@ -112,8 +147,10 @@ def gcp_fetch_logs(user_id: int):
                 if parsed:
                     all_events.append(parsed)
             _set_last_fetch_time(user_id, "cloud_run_logs", datetime.now(timezone.utc))
-        except Exception:
+        except Exception as exc:
+            had_error = True
             logger.exception("Failed to fetch Cloud Run logs for user %s", user_id)
+            _set_collection_error(user_id, "cloud_run_logs", str(exc))
 
     # Load Balancer Logs
     if "load_balancer" in enabled:
@@ -129,8 +166,10 @@ def gcp_fetch_logs(user_id: int):
                 if parsed:
                     all_events.append(parsed)
             _set_last_fetch_time(user_id, "load_balancer", datetime.now(timezone.utc))
-        except Exception:
+        except Exception as exc:
+            had_error = True
             logger.exception("Failed to fetch LB logs for user %s", user_id)
+            _set_collection_error(user_id, "load_balancer", str(exc))
 
     # Cloud Armor Logs
     if "cloud_armor" in enabled:
@@ -146,8 +185,10 @@ def gcp_fetch_logs(user_id: int):
                 if parsed:
                     all_events.append(parsed)
             _set_last_fetch_time(user_id, "cloud_armor", datetime.now(timezone.utc))
-        except Exception:
+        except Exception as exc:
+            had_error = True
             logger.exception("Failed to fetch Cloud Armor logs for user %s", user_id)
+            _set_collection_error(user_id, "cloud_armor", str(exc))
 
     # IAM Audit Logs
     if "iam_audit" in enabled:
@@ -163,8 +204,10 @@ def gcp_fetch_logs(user_id: int):
                 if parsed:
                     all_events.append(parsed)
             _set_last_fetch_time(user_id, "iam_audit", datetime.now(timezone.utc))
-        except Exception:
+        except Exception as exc:
+            had_error = True
             logger.exception("Failed to fetch IAM audit logs for user %s", user_id)
+            _set_collection_error(user_id, "iam_audit", str(exc))
 
     # IAP Logs
     if "iap" in enabled:
@@ -180,8 +223,13 @@ def gcp_fetch_logs(user_id: int):
                 if parsed:
                     all_events.append(parsed)
             _set_last_fetch_time(user_id, "iap", datetime.now(timezone.utc))
-        except Exception:
+        except Exception as exc:
+            had_error = True
             logger.exception("Failed to fetch IAP logs for user %s", user_id)
+            _set_collection_error(user_id, "iap", str(exc))
+
+    if not had_error:
+        _clear_collection_error(user_id, "logs")
 
     if not all_events:
         return
@@ -251,7 +299,10 @@ def gcp_fetch_metrics(user_id: int):
         return
 
     config = _get_gcp_config(user)
-    if not config or "cloud_monitoring" not in config["enabled_sources"]:
+    if not config:
+        _set_collection_error(user_id, "metrics", _NOT_CONFIGURED_MSG)
+        return
+    if "cloud_monitoring" not in config["enabled_sources"]:
         return
 
     from monitor.services.gcp_metrics_fetcher import fetch_service_metrics
@@ -261,9 +312,12 @@ def gcp_fetch_metrics(user_id: int):
             service_account_key_json=config["service_account_key_json"],
             project_id=config["project_id"],
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Failed to fetch Cloud Monitoring metrics for user %s", user_id)
+        _set_collection_error(user_id, "metrics", str(exc))
         return
+
+    _clear_collection_error(user_id, "metrics")
 
     now = datetime.now(timezone.utc)
     bucket_start = now - timedelta(minutes=5)
@@ -313,6 +367,7 @@ def gcp_discover_services(user_id: int):
 
     config = _get_gcp_config(user)
     if not config:
+        _set_collection_error(user_id, "discovery", _NOT_CONFIGURED_MSG)
         return
 
     from monitor.services.gcp_discovery import discover_services
@@ -324,9 +379,12 @@ def gcp_discover_services(user_id: int):
             regions=config["regions"] or None,
             service_filters=config["service_filters"] or None,
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Failed to discover Cloud Run services for user %s", user_id)
+        _set_collection_error(user_id, "discovery", str(exc))
         return
+
+    _clear_collection_error(user_id, "discovery")
 
     for svc in services:
         GcpObservedService.objects.update_or_create(
@@ -357,7 +415,10 @@ def gcp_fetch_timeseries(user_id: int):
         return
 
     config = _get_gcp_config(user)
-    if not config or "cloud_monitoring" not in config["enabled_sources"]:
+    if not config:
+        _set_collection_error(user_id, "timeseries", _NOT_CONFIGURED_MSG)
+        return
+    if "cloud_monitoring" not in config["enabled_sources"]:
         return
 
     from monitor.services.gcp_metrics_fetcher import fetch_timeseries
@@ -369,8 +430,10 @@ def gcp_fetch_timeseries(user_id: int):
             minutes_back=60,
         )
         publish_gcp_timeseries_update(ts_data)
-    except Exception:
+        _clear_collection_error(user_id, "timeseries")
+    except Exception as exc:
         logger.exception("Failed to fetch timeseries for user %s", user_id)
+        _set_collection_error(user_id, "timeseries", str(exc))
 
 
 # ---------------------------------------------------------------------------

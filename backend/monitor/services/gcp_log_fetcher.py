@@ -7,6 +7,12 @@ from datetime import datetime, timedelta, timezone
 from google.cloud import logging_v2
 from google.oauth2 import service_account
 
+from .gcp_errors import (
+    GcpCollectionError,
+    build_gcp_error_message,
+    format_exception_message,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,8 +32,15 @@ def _fetch_entries(client, filter_str: str, max_entries: int = 500) -> list[dict
             order_by=logging_v2.DESCENDING,
         ):
             entries.append(_entry_to_dict(entry))
-    except Exception:
+    except Exception as exc:
         logger.exception("Cloud Logging query failed: %s", filter_str[:200])
+        raise GcpCollectionError(
+            build_gcp_error_message(
+                "Cloud Logging query",
+                message=format_exception_message(exc),
+                hint="Grant the service account roles/logging.viewer.",
+            )
+        ) from exc
     return entries
 
 

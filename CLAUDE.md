@@ -103,32 +103,39 @@ Frontend ←── Socket.IO ←── Realtime ←── Redis pub/sub ←─�
 
 **`scanner/`** — Dependency vulnerability + code security scanning
 - Models: `GitHubScan` → `Dependency` → `Vulnerability`, plus `AiReport` (1:1) and `CodeFinding` (1:N)
+- ADK pipeline models: `AdkTraceEvent`, `CodeScanFileIndex`, `CodeScanChunk`, `CodeScanCandidate`
 - Supports GitHub repos (via PAT in Django session) and local directories (validated against `LOCAL_SCAN_ROOT`)
 - `services/dependency_parser.py`: Parses package.json, requirements.txt, pyproject.toml, go.mod, Gemfile
 - `services/osv_scanner.py`: Celery tasks `run_full_scan` / `run_local_scan` — queries OSV API, creates records, triggers AI report + code scan
 - `services/ai_reporter.py`: Generates security scores and remediation via Gemini
+- `services/adk_code_pipeline.py`: Multi-stage AI code analysis — inventory → chunking → summarization → 7 risk passes → candidate generation → evidence expansion → verification → repo synthesis
 - `services/code_scanner.py`: AI-powered source code security analysis
 - `services/github_client.py` / `local_client.py`: File fetching with extension filtering, size limits (50KB), skip dirs (node_modules, .git, etc.)
+
+**`accounts/`** — User auth and per-user settings
+- `UserSettings` (1:1 with User): google_api_key, github_pat, gemini_model, GCP config fields
+- `GeminiLog`: Audit trail for all Gemini API calls (tokens, duration, status)
 
 **`cyberlens/`** — Django project config
 - `urls.py`: `/api/` → monitor, `/api/github/` → scanner, `/api/settings/` → API key management
 - `celery.py`: Celery app with Redis broker
-- `utils.py`: `get_google_api_key()` (Redis-cached), `clean_json_response()` (strips markdown from LLM output)
+- `utils.py`: `get_google_api_key()` (Redis-cached), `clean_json_response()` (strips markdown from LLM output), `log_gemini_call()` audit logging
 
 ### Frontend Structure
 
 - `App.tsx`: Three-tab layout — Live Monitor, Code Scan, Settings
-- `services/api.ts`: REST client with dual-backend support (local + optional remote Cloud Run)
-- `hooks/useSocket.ts`: Socket.IO hook for real-time events
+- `services/api.ts`: REST client with dual-backend support (local + optional remote Cloud Run), auto CSRF token injection
+- `hooks/useSocket.ts`: Socket.IO hook for real-time events (listens to 12 Redis channels)
 - `theme/theme.ts`: Material You (M3) design tokens + `socColors` dark SOC theme tokens
+- `types/index.ts`: All TypeScript interfaces (auth, monitor, scanner, GCP types)
 - `pages/LiveMonitorPage.tsx`: GCP Security SOC dashboard — dark-theme war room with estate matrix, threat timeline, perimeter lanes, geo attack map, evidence feed, incident queue, triage drawer
-- `pages/SupplyChainPage.tsx`: D3 dependency tree + vulnerability list + AI remediation report + code findings
+- `pages/SupplyChainPage.tsx`: D3 dependency tree + vulnerability list + AI remediation report + code findings + ADK pipeline trace
 - `pages/SettingsPage.tsx`: Cloud Run URL, API key, GitHub PAT, project selection
 
 ### Realtime Service
 
 - `src/index.ts`: Express + Socket.IO server with session-based auth (verifies via backend `/api/verify-session/`)
-- `src/redis-subscriber.ts`: Subscribes to 12 Redis `cyberlens:*` channels (7 legacy + 5 GCP), broadcasts parsed JSON to all Socket.IO clients
+- `src/redis-subscriber.ts`: Subscribes to 12 Redis `cyberlens:*` channels, broadcasts parsed JSON to all Socket.IO clients
 
 ### Key Environment Variables (see .env.example)
 - `DATABASE_URL` — PostgreSQL connection string
@@ -143,3 +150,7 @@ Frontend ←── Socket.IO ←── Realtime ←── Redis pub/sub ←─�
 - All real-time communication flows through Redis pub/sub → Socket.IO (never direct backend→frontend WebSocket)
 - Frontend uses inline styles with CSS custom properties from theme; no CSS framework
 - GitHub PATs are stored in Django sessions, not environment variables
+- Celery runs in eager mode during dev/test (tasks execute synchronously)
+- Frontend dev proxy: `/api` → `http://localhost:8000` (change to `localhost` when running outside Docker)
+- Frontend tests use vitest + jsdom + React Testing Library; socket.io-client is globally mocked in test setup
+- All Gemini API calls are audited to the `GeminiLog` table with token counts and duration

@@ -151,9 +151,12 @@ export default function SettingsPage({
             marginBottom: 16,
           }}
         >
-          Connect to Google Cloud Logging to view Cloud Run service logs in the
-          Live Monitor tab. Requires a service account with{" "}
-          <code>roles/logging.viewer</code>.
+          Connect Google Cloud so Live Monitor can discover Cloud Run services,
+          read Cloud Logging, and fetch Cloud Monitoring metrics. Recommended
+          roles: <code>roles/logging.viewer</code>,{" "}
+          <code>roles/monitoring.viewer</code>, and{" "}
+          <code>roles/run.viewer</code>. Also ensure the Cloud Run Admin API and
+          Cloud Monitoring API are enabled.
         </p>
         <GcpLoggingConfig />
       </div>

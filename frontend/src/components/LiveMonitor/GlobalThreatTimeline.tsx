@@ -149,11 +149,12 @@ export default function GlobalThreatTimeline({ data }: Props) {
               />
               <Tooltip
                 contentStyle={{
-                  background: socColors.bgPanel,
+                  background: "#ffffff",
                   border: `1px solid ${socColors.border}`,
                   borderRadius: 6,
                   color: socColors.text,
                   fontSize: 12,
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
                 }}
                 labelFormatter={formatTime}
               />

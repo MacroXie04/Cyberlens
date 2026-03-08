@@ -186,7 +186,7 @@ export default function IncidentQueue({
                   {inc.services_affected.length !== 1 ? "s" : ""}
                 </span>
                 <span>
-                  {(inc.confidence * 100).toFixed(0)}% confidence
+                  {((inc.confidence ?? 0) * 100).toFixed(0)}% confidence
                 </span>
               </div>
             </div>

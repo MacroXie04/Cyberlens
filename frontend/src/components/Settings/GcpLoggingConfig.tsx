@@ -135,7 +135,8 @@ export default function GcpLoggingConfig() {
           }}
         />
         <div style={{ fontSize: 12, color: "var(--md-on-surface-variant)", marginTop: 4 }}>
-          Requires <code>roles/logging.viewer</code> permission
+          Live Monitor also needs <code>roles/run.viewer</code> and{" "}
+          <code>roles/monitoring.viewer</code> for service discovery and health metrics.
         </div>
       </div>
 

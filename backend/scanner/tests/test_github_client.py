@@ -1,6 +1,8 @@
 from unittest.mock import patch
 
-from scanner.services.github_client import get_source_files
+import pytest
+
+from scanner.services.github_client import GitHubRepositoryFetchError, _get_repo_tree, get_source_files
 
 
 class TestGitHubSourceFiles:
@@ -20,3 +22,12 @@ class TestGitHubSourceFiles:
 
         assert files == {"AppDelegate.swift": "import SwiftUI"}
         mock_fetch.assert_called_once_with("ghp_token", "owner", "repo", ["AppDelegate.swift"])
+
+    @patch("scanner.services.github_client.requests.get")
+    def test_repo_tree_error_raises(self, mock_get):
+        import requests
+
+        mock_get.side_effect = requests.RequestException("boom")
+
+        with pytest.raises(GitHubRepositoryFetchError, match="Failed to fetch repo tree"):
+            _get_repo_tree("ghp_token", "owner/repo")

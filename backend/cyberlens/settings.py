@@ -60,40 +60,12 @@ TEMPLATES = [
 WSGI_APPLICATION = "cyberlens.wsgi.application"
 
 # Database
-DATABASE_URL = os.getenv("DATABASE_URL", "")
-if DATABASE_URL:
-    # Parse postgresql://user:pass@host:port/dbname
-    import re
-
-    m = re.match(
-        r"postgresql://(?P<user>[^:]+):(?P<password>[^@]+)@(?P<host>[^:]+):(?P<port>\d+)/(?P<name>.+)",
-        DATABASE_URL,
-    )
-    if m:
-        DATABASES = {
-            "default": {
-                "ENGINE": "django.db.backends.postgresql",
-                "NAME": m.group("name"),
-                "USER": m.group("user"),
-                "PASSWORD": m.group("password"),
-                "HOST": m.group("host"),
-                "PORT": m.group("port"),
-            }
-        }
-    else:
-        DATABASES = {
-            "default": {
-                "ENGINE": "django.db.backends.sqlite3",
-                "NAME": BASE_DIR / "db.sqlite3",
-            }
-        }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
-        }
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "db.sqlite3",
     }
+}
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -130,26 +102,21 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 50,
 }
 
-# Redis
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-
-# Cache (shared between web and worker processes)
+# Cache
 CACHES = {
     "default": {
-        "BACKEND": "django.core.cache.backends.redis.RedisCache",
-        "LOCATION": REDIS_URL,
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
     }
 }
 
-# Celery
-CELERY_BROKER_URL = REDIS_URL
-CELERY_RESULT_BACKEND = REDIS_URL
+# Celery (eager mode — tasks run synchronously in-process)
+CELERY_TASK_ALWAYS_EAGER = True
+CELERY_TASK_EAGER_PROPAGATES = True
+CELERY_BROKER_URL = "memory://"
+CELERY_RESULT_BACKEND = "cache+memory://"
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
-CELERY_BEAT_SCHEDULE = {
-    # GCP aggregator does not use static beat schedule — tasks are triggered
-    # per-user via the frontend refresh endpoint or manual invocation.
-}
+CELERY_BEAT_SCHEDULE = {}
 
 # Nginx log path
 NGINX_LOG_PATH = os.getenv("NGINX_LOG_PATH", "/var/log/nginx/access.json")

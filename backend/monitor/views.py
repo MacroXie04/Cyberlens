@@ -1,6 +1,7 @@
 import logging
 from datetime import timedelta
 
+from django.core.cache import cache
 from django.db.models import Count, Q
 from django.db.models.functions import TruncHour
 from django.utils import timezone as tz
@@ -218,6 +219,8 @@ def gcp_estate_summary(request):
         user=request.user, project_id=project_id, error_rate__gt=0.05
     ).count()
 
+    from monitor.services.gcp_aggregator import get_collection_errors
+
     return Response({
         "project_id": project_id,
         "active_incidents": open_incidents,
@@ -228,6 +231,7 @@ def gcp_estate_summary(request):
         "total_events_recent": total_events,
         "total_services": services.count(),
         "unhealthy_revisions": unhealthy,
+        "collection_errors": get_collection_errors(request.user.id),
     })
 
 
@@ -393,15 +397,59 @@ def gcp_security_map(request):
 @api_view(["POST"])
 def gcp_trigger_refresh(request):
     """POST /api/gcp-estate/refresh — manually trigger a full refresh cycle."""
+    project_id = _get_user_project_id(request)
+    if not project_id:
+        return Response(
+            {"error": "GCP project not configured. Set project ID and service account key in Settings."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     from monitor.services.gcp_aggregator import (
         gcp_fetch_logs,
         gcp_fetch_metrics,
         gcp_discover_services,
+        gcp_fetch_timeseries,
+        _collection_errors_key,
     )
 
     user_id = request.user.id
+
+    # Clear stale errors so fresh results take over
+    cache.delete(_collection_errors_key(user_id))
+
     gcp_discover_services.delay(user_id)
     gcp_fetch_logs.delay(user_id)
     gcp_fetch_metrics.delay(user_id)
+    gcp_fetch_timeseries.delay(user_id)
 
     return Response({"status": "refresh_triggered"})
+
+
+@api_view(["POST"])
+def gcp_ensure_collection(request):
+    """POST /api/gcp-estate/ensure-collection/ — auto-trigger tasks with cooldown."""
+    user_id = request.user.id
+    cooldown_key = f"gcp_last_collection:{user_id}"
+
+    if cache.get(cooldown_key):
+        return Response({"triggered": False})
+
+    project_id = _get_user_project_id(request)
+    if not project_id:
+        return Response({"triggered": False, "error": "GCP not configured"})
+
+    from monitor.services.gcp_aggregator import (
+        gcp_fetch_logs,
+        gcp_fetch_metrics,
+        gcp_discover_services,
+        gcp_fetch_timeseries,
+    )
+
+    gcp_discover_services.delay(user_id)
+    gcp_fetch_logs.delay(user_id)
+    gcp_fetch_metrics.delay(user_id)
+    gcp_fetch_timeseries.delay(user_id)
+
+    cache.set(cooldown_key, True, timeout=15)
+
+    return Response({"triggered": True})

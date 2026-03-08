@@ -258,7 +258,8 @@ def generate_report(scan: GitHubScan, user_id: int | None = None):
             },
         )
         scan.security_score = 100
-        scan.save(update_fields=["security_score"])
+        scan.dependency_score = 100
+        scan.save(update_fields=["security_score", "dependency_score"])
         record_trace_event(
             scan,
             phase="dependency_adk_report",
@@ -377,7 +378,8 @@ def generate_report(scan: GitHubScan, user_id: int | None = None):
         result = SecurityReport.model_validate_json(clean_json_response(response_text))
 
         scan.security_score = result.security_score
-        scan.save(update_fields=["security_score"])
+        scan.dependency_score = result.security_score
+        scan.save(update_fields=["security_score", "dependency_score"])
 
         AiReport.objects.create(
             scan=scan,
