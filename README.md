@@ -1,230 +1,227 @@
 # CyberLens
 
-CyberLens is a full-stack security dashboard for two related workflows:
+**AI-powered security monitoring and vulnerability scanning dashboard.**
 
-- real-time monitoring of HTTP traffic from structured Nginx access logs
-- AI-assisted supply chain and source code security scanning for GitHub repos and local projects
+CyberLens is a full-stack security platform that combines real-time GCP infrastructure monitoring with AI-driven supply chain and source code vulnerability scanning. It uses Google Gemini (via Google ADK) for intelligent threat analysis and remediation guidance, streams events to the browser in real time over WebSockets, and scans both GitHub repositories and local projects.
 
-The project combines a Django API, a React dashboard, a Socket.IO realtime service, Redis pub/sub, Celery background jobs, and PostgreSQL.
+## Screenshots
 
-## What It Does
+### Live Monitor — GCP Security SOC Dashboard
 
-- Ingests JSON Nginx access logs and turns them into live request events
-- Runs AI threat analysis on batched traffic using Google Gemini via Google ADK
-- Scans dependency manifests against the OSV vulnerability database
-- Performs AI-assisted code security analysis on application source files
-- Streams scan progress and code scan activity to the frontend in real time
-- Supports both GitHub repositories and local directories
-- Lets the monitoring dashboard point at a remote Cloud Run instance while keeping scanning local
+![Live Monitor](Screenshots/LiveMonitor.png)
+
+Real-time security operations center view with estate matrix, global threat timeline, perimeter event lanes, geo attack map, and incident feed. Monitors Cloud Run services, Load Balancer traffic, Cloud Armor rules, IAM audit logs, and IAP events.
+
+### Code Scan — Supply Chain & Vulnerability Analysis
+
+![Code Scan](Screenshots/CodeScan.png)
+
+Scan GitHub repos or local projects for dependency vulnerabilities (via OSV) and source code security issues. Displays dependency counts, vulnerability stats, an AI-generated repository security summary, and a full agent request log tracing the multi-stage ADK analysis pipeline.
+
+### Code Security Findings
+
+![Code Security Findings](Screenshots/CodeSecurityFindings.png)
+
+Detailed code-level security findings with severity ratings, CWE classifications, affected file locations, and AI-generated remediation guidance for each issue.
+
+### Settings
+
+![Settings](Screenshots/Settings.png)
+
+Configure GCP service account credentials, Google API key, Gemini model selection, GitHub PAT connection, and select repositories for scanning.
+
+## Features
+
+- **GCP Security SOC** — Polls Cloud Run, Load Balancer, Cloud Armor, IAM Audit, and IAP logs; classifies events with pattern-based attack detection; clusters events into incidents with configurable thresholds
+- **Real-time streaming** — All events flow through Redis pub/sub to a Socket.IO bridge, delivering live updates to the browser with no polling
+- **Dependency scanning** — Parses `package.json`, `requirements.txt`, `pyproject.toml`, `go.mod`, and `Gemfile`; queries the OSV vulnerability database
+- **AI code security analysis** — Multi-stage ADK pipeline: file inventory, chunking, summarization, 7 risk analysis passes, candidate generation, evidence expansion, verification, and repository-level synthesis
+- **AI threat analysis** — Batched HTTP traffic analysis and security remediation reports powered by Gemini
+- **Dual scan targets** — Scan GitHub repositories (via PAT) or local directories
+- **Hybrid deployment** — Point the monitoring dashboard at a remote Cloud Run backend while keeping code scanning local
 
 ## Architecture
 
-```text
-Nginx JSON logs
-  -> Django log watcher
-  -> Celery analysis tasks
-  -> PostgreSQL + Redis pub/sub
-  -> Node/Socket.IO realtime bridge
-  -> React dashboard
+```
+GCP Logs / Nginx JSON logs
+  --> Django log watcher + GCP aggregator
+  --> Celery background tasks (analysis, scanning, AI pipelines)
+  --> SQLite + Redis pub/sub
+  --> Node.js Socket.IO realtime bridge
+  --> React dashboard
 
 GitHub repo or local project
-  -> Django scanner endpoints
-  -> Celery dependency/code scan tasks
-  -> OSV + Gemini analysis
-  -> PostgreSQL + Redis pub/sub
-  -> React dashboard
+  --> Django scanner endpoints
+  --> Celery dependency + code scan tasks
+  --> OSV API + Gemini ADK analysis
+  --> SQLite + Redis pub/sub
+  --> React dashboard
 ```
 
-## Stack
+## Tech Stack
 
-- `frontend/`: React 18, TypeScript, Vite, D3, Recharts, Socket.IO client
-- `backend/`: Django 5, Django REST Framework, Celery, Redis, PostgreSQL
-- `realtime/`: Node.js, Express, Socket.IO, ioredis
-- `nginx/`: sample Nginx config that emits JSON access logs
+| Layer | Technologies |
+| --- | --- |
+| **Frontend** | React 18, TypeScript, Vite, D3, Recharts, Material You (M3), Socket.IO client |
+| **Backend** | Django 5.1, Django REST Framework, Celery, Python 3.12 |
+| **AI** | Google ADK, Gemini 2.5 Flash, Pydantic structured output |
+| **Realtime** | Node.js, Express, Socket.IO, ioredis |
+| **Infrastructure** | SQLite, Redis, Nginx |
 
-## Run with Docker
-
-CyberLens can run entirely with Docker Compose. This is the recommended way to start the full application because it brings up the frontend, backend, Celery worker, realtime server, PostgreSQL, and Redis together.
-
-The current frontend proxy configuration also assumes the Docker service names `backend` and `realtime`.
-
-### 1. Configure environment variables
-
-Copy the example file and update the values you need:
+## Quick Start
 
 ```bash
+# 1. Configure environment
 cp .env.example .env
-```
+# Edit .env — set GOOGLE_API_KEY at minimum
 
-Important values:
-
-- `GOOGLE_API_KEY`: required for AI threat analysis, AI remediation reports, and code scanning
-- `LOCAL_SCAN_ROOT`: host directory that should be mounted read-only into the containers for local project scans
-- `NGINX_LOG_PATH`: path watched by the log watcher for JSON access logs
-
-The provided `.env.example` already contains working local defaults for PostgreSQL, Redis, and Django.
-
-### 2. Build and start the stack
-
-```bash
-docker compose up --build
-```
-
-This starts these containers:
-
-- frontend: [http://localhost:5173](http://localhost:5173)
-- backend: [http://localhost:8000](http://localhost:8000)
-- realtime: [http://localhost:3001/health](http://localhost:3001/health)
-- worker: Celery background jobs
-- postgres: `localhost:5432`
-- redis: `localhost:6379`
-
-### 3. Start using the app
-
-The backend now runs `python manage.py migrate --noinput` automatically during container startup, so a fresh `docker compose up --build` creates the built-in Django tables, including `django_session`, before the API begins serving requests.
-
-### 4. Create a user session for the app
-
-The API uses Django session authentication by default, and the current frontend does not include a dedicated login screen yet.
-
-The simplest browser-based flow is:
-
-```bash
-docker compose exec backend python manage.py createsuperuser
-```
-
-Then sign in at [http://localhost:8000/admin/](http://localhost:8000/admin/). The Django session cookie is scoped to `localhost`, so the frontend on port `5173` can reuse it for proxied `/api` calls.
-
-If you prefer API auth, the backend also exposes:
-
-- `POST /api/auth/register/`
-- `POST /api/auth/login/`
-- `POST /api/auth/logout/`
-- `GET /api/auth/me/`
-
-### 5. Start log watching for live monitoring
-
-The Compose file starts the web server, worker, Redis, and database, but the Nginx log watcher is a separate process. Start it in another terminal:
-
-```bash
-docker compose exec backend python manage.py watch_logs
-```
-
-CyberLens expects newline-delimited JSON access logs at `NGINX_LOG_PATH`. A sample Nginx config is available in [`nginx/nginx.conf`](nginx/nginx.conf).
-
-### 6. Stop the stack
-
-```bash
-docker compose down
-```
-
-If you also want to remove the PostgreSQL volume:
-
-```bash
-docker compose down -v
-```
-
-## Local Development Without Docker
-
-You can run the services directly, but there is one important caveat: [`frontend/vite.config.ts`](frontend/vite.config.ts) currently proxies `/api` to `http://backend:8000` and `/socket.io` to `http://realtime:3001`. If you run the frontend on the host instead of inside Docker, change those proxy targets to `localhost` first.
-
-### Backend
-
-```bash
+# 2. Backend
 cd backend
-python -m venv .venv
-source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python manage.py migrate
+python manage.py migrate          # creates local SQLite database
+python manage.py createsuperuser  # create a user
 python manage.py runserver 0.0.0.0:8000
+
+# 3. Celery worker (separate terminal)
+cd backend && celery -A cyberlens worker -l INFO
+
+# 4. Frontend (separate terminal)
+cd frontend && npm install && npm run dev
+
+# 5. Realtime (separate terminal)
+cd realtime && npm install && npm run dev
+
+# 6. Sign in at http://localhost:8000/admin/
+#    Then open http://localhost:5173
 ```
 
-In separate terminals:
+Services run on:
+
+| Service | URL |
+| --- | --- |
+| Frontend | http://localhost:5173 |
+| Backend API | http://localhost:8000 |
+| Realtime | http://localhost:3001 |
+
+Redis must be running locally on `localhost:6379` (used by Celery and the realtime service).
+
+To start the Nginx log watcher for live HTTP monitoring:
 
 ```bash
-cd backend
-celery -A cyberlens worker -l INFO
+cd backend && python manage.py watch_logs
 ```
 
-```bash
-cd backend
-python manage.py watch_logs
+## Authentication
+
+The API uses Django session authentication. After creating a superuser and signing in via `/admin/`, the session cookie works for the frontend on `localhost:5173`.
+
+API auth endpoints are also available:
+
 ```
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-### Realtime
-
-```bash
-cd realtime
-npm install
-npm run dev
+POST /api/auth/register/
+POST /api/auth/login/
+POST /api/auth/logout/
+GET  /api/auth/me/
 ```
 
 ## Environment Variables
 
-Core settings are loaded from the repository root `.env`.
+Core settings are loaded from the repository root `.env`. See [`.env.example`](.env.example) for defaults.
 
 | Variable | Purpose |
 | --- | --- |
-| `POSTGRES_DB` | PostgreSQL database name used by Compose |
-| `POSTGRES_USER` | PostgreSQL username used by Compose |
-| `POSTGRES_PASSWORD` | PostgreSQL password used by Compose |
-| `DATABASE_URL` | Django database connection string |
-| `REDIS_URL` | Redis connection string used by Django, Celery, and realtime |
-| `GOOGLE_API_KEY` | Gemini API key used for AI analysis |
+| `GOOGLE_API_KEY` | Gemini API key for AI analysis (also settable via UI) |
+| `LOCAL_SCAN_ROOT` | Base directory for local project scans |
+| `NGINX_LOG_PATH` | Path to Nginx JSON access log for live monitoring |
+| `REDIS_URL` | Redis connection string for Celery, pub/sub, and realtime |
 | `DJANGO_SECRET_KEY` | Django secret key |
-| `DJANGO_DEBUG` | Enables Django debug mode when `true` |
+| `DJANGO_DEBUG` | Enable Django debug mode (`true`/`false`) |
 | `ALLOWED_HOSTS` | Comma-separated Django allowed hosts |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated allowed frontend origins |
-| `NGINX_LOG_PATH` | Path to the structured access log watched by `watch_logs` |
-| `LOCAL_SCAN_ROOT` | Base directory exposed for local project scans |
 
-## Project Layout
+## API Reference
 
-```text
-.
-├── backend/    Django API, Celery tasks, auth, monitor, scanner
-├── frontend/   React dashboard
-├── realtime/   Socket.IO bridge for Redis pub/sub events
-├── nginx/      Example JSON access-log Nginx config
-├── docker-compose.yml
-└── .env.example
+### Monitoring
+
+```
+GET  /api/requests/
+GET  /api/stats/overview/
+GET  /api/stats/timeline/
+GET  /api/stats/geo/
 ```
 
-## Key API Areas
+### GCP Security
 
-- `GET /api/requests/`, `GET /api/stats/overview/`, `GET /api/stats/timeline/`, `GET /api/stats/geo/`
-- `GET /api/github/status/`, `POST /api/github/connect/`, `GET /api/github/repos/`
-- `POST /api/github/scan/`, `POST /api/github/local/scan/`
-- `GET /api/github/scan/<id>/`, `GET /api/github/scan/<id>/ai-report/`, `GET /api/github/scan/<id>/code-findings/`
-- `GET /api/settings/`, `PUT /api/settings/`, `POST /api/settings/test-key/`
+```
+GET  /api/gcp-estate/summary/
+GET  /api/gcp-estate/services/
+GET  /api/gcp-estate/timeseries/
+POST /api/gcp-estate/refresh/
+GET  /api/gcp-security/events/
+GET  /api/gcp-security/incidents/
+GET  /api/gcp-security/incidents/:id/
+POST /api/gcp-security/incidents/:id/ack/
+GET  /api/gcp-security/map/
+```
+
+### Scanner
+
+```
+GET  /api/github/status/
+POST /api/github/connect/
+GET  /api/github/repos/
+POST /api/github/scan/
+POST /api/github/local/scan/
+GET  /api/github/scan/:id/
+GET  /api/github/scan/:id/ai-report/
+GET  /api/github/scan/:id/code-findings/
+```
+
+### Settings
+
+```
+GET  /api/settings/
+PUT  /api/settings/
+POST /api/settings/test-key/
+```
 
 ## Testing
 
-Backend tests are configured with `pytest`:
-
 ```bash
+# Backend (pytest)
 cd backend
-pytest
+pytest                          # all tests
+pytest monitor/tests/           # monitor app tests
+pytest scanner/tests/           # scanner app tests
+pytest -k test_scan_detail      # single test by name
+
+# Frontend (vitest + type check)
+cd frontend
+npm test                        # vitest
+npx tsc -b                      # type check
 ```
 
-You can also run targeted suites:
+CI runs on push/PR to `main` via GitHub Actions — Python 3.12 pytest + Node 20 type check and vitest.
 
-```bash
-pytest monitor/tests/
-pytest scanner/tests/
+## Project Layout
+
+```
+.
+├── backend/           Django API, Celery tasks, auth, monitor, scanner
+│   ├── accounts/      User auth and per-user settings
+│   ├── monitor/       HTTP monitoring + GCP Security SOC
+│   ├── scanner/       Dependency + code security scanning
+│   └── cyberlens/     Django project config, Celery, utilities
+├── frontend/          React 18 TypeScript dashboard
+│   ├── pages/         LiveMonitorPage, SupplyChainPage, SettingsPage
+│   ├── services/      API client, Socket.IO hooks
+│   └── theme/         Material You design tokens
+├── realtime/          Node.js Socket.IO ↔ Redis pub/sub bridge
+├── nginx/             Example JSON access-log Nginx config
+└── .env.example
 ```
 
-## Notes
+## License
 
-- Local scanning is restricted to directories under `LOCAL_SCAN_ROOT`.
-- Source code scanning ignores common generated/vendor directories such as `node_modules`, `.git`, `dist`, `build`, and virtual environments.
-- The realtime service validates the Django session before allowing a Socket.IO connection.
-- Monitoring data comes from structured Nginx logs; if you do not run `watch_logs`, the Live Monitor page will stay idle.
+This project is not currently published under an open-source license.
