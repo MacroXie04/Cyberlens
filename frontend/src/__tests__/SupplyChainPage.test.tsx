@@ -46,6 +46,9 @@ vi.mock("../components/SupplyChain/CodeSecurityFindings", () => ({
 vi.mock("../components/SupplyChain/DependencyInventory", () => ({
   default: () => <div>Dependency Inventory Stub</div>,
 }));
+vi.mock("../components/SupplyChain/DependencyList", () => ({
+  default: () => <div>Dependency List Stub</div>,
+}));
 vi.mock("../components/SupplyChain/DependencyTree", () => ({
   default: () => <div>Dependency Tree Stub</div>,
 }));
@@ -172,5 +175,50 @@ describe("SupplyChainPage scan start behavior", () => {
 
     expect(triggerScan).toHaveBeenCalledTimes(1);
     expect(triggerScan).toHaveBeenCalledWith("MacroXie04/numberBomb", "fast");
+  });
+
+  it("Dependencies tab shows inventory, tree, and list stubs", async () => {
+    const user = userEvent.setup();
+    getScanHistory.mockResolvedValue([makeHistoryItem()]);
+    getScanResults.mockResolvedValue({
+      ...makeTriggeredScan(),
+      id: 9,
+      scan_status: "completed",
+      total_deps: 12,
+      vulnerable_deps: 2,
+      security_score: 81,
+      dependency_score: 76,
+      code_security_score: 89,
+    });
+
+    render(<SupplyChainPage selectedProject={makeSelectedProject()} />);
+
+    await screen.findAllByText("Stored result");
+    await user.click(screen.getByRole("button", { name: /^Dependencies/i }));
+
+    expect(screen.getByText("Dependency Inventory Stub")).toBeInTheDocument();
+    expect(screen.getByText("Dependency Tree Stub")).toBeInTheDocument();
+    expect(screen.getByText("Dependency List Stub")).toBeInTheDocument();
+  });
+
+  it("Overview tab shows tree but not the list", async () => {
+    getScanHistory.mockResolvedValue([makeHistoryItem()]);
+    getScanResults.mockResolvedValue({
+      ...makeTriggeredScan(),
+      id: 9,
+      scan_status: "completed",
+      total_deps: 12,
+      vulnerable_deps: 2,
+      security_score: 81,
+      dependency_score: 76,
+      code_security_score: 89,
+    });
+
+    render(<SupplyChainPage selectedProject={makeSelectedProject()} />);
+
+    await screen.findAllByText("Stored result");
+
+    expect(screen.getByText("Dependency Tree Stub")).toBeInTheDocument();
+    expect(screen.queryByText("Dependency List Stub")).not.toBeInTheDocument();
   });
 });

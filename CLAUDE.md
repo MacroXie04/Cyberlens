@@ -9,7 +9,7 @@ CyberLens is a full-stack security dashboard with three services:
 - **frontend/** — React 18 SPA (TypeScript, Vite)
 - **realtime/** — Node.js Socket.IO server bridging Redis pub/sub to WebSocket clients
 
-Infrastructure: PostgreSQL, Redis, Nginx (JSON access log format for monitoring).
+Infrastructure: Redis, Nginx (JSON access log format for monitoring). Local dev uses SQLite; Docker uses PostgreSQL (via `DATABASE_URL`).
 
 ## Commands
 
@@ -138,11 +138,11 @@ Frontend ←── Socket.IO ←── Realtime ←── Redis pub/sub ←─�
 - `src/redis-subscriber.ts`: Subscribes to 12 Redis `cyberlens:*` channels, broadcasts parsed JSON to all Socket.IO clients
 
 ### Key Environment Variables (see .env.example)
-- `DATABASE_URL` — PostgreSQL connection string
-- `REDIS_URL` — Redis connection string
+- `REDIS_URL` — Redis connection string (used by Celery and realtime service)
 - `GOOGLE_API_KEY` — Gemini API key (also settable via UI, cached in Redis)
 - `LOCAL_SCAN_ROOT` — Base directory for local project scanning (maps to `/scan-targets` in container)
 - `NGINX_LOG_PATH` — Path to Nginx JSON access log for monitoring
+- `DATABASE_URL` — PostgreSQL connection string (Docker only; local dev uses SQLite via `settings.py` default)
 
 ### Conventions
 - Backend uses Django REST Framework serializers for all API responses
@@ -151,6 +151,6 @@ Frontend ←── Socket.IO ←── Realtime ←── Redis pub/sub ←─�
 - Frontend uses inline styles with CSS custom properties from theme; no CSS framework
 - GitHub PATs are stored in Django sessions, not environment variables
 - Celery runs in eager mode during dev/test (tasks execute synchronously)
-- Frontend dev proxy: `/api` → `http://localhost:8000` (change to `localhost` when running outside Docker)
+- Frontend dev proxy: `/api` → `http://localhost:8000`, `/socket.io` → `http://localhost:3001` (configured in `vite.config.ts`)
 - Frontend tests use vitest + jsdom + React Testing Library; socket.io-client is globally mocked in test setup
 - All Gemini API calls are audited to the `GeminiLog` table with token counts and duration

@@ -10,6 +10,7 @@ interface Props {
 interface SimNode extends d3.SimulationNodeDatum {
   id: string;
   name: string;
+  fullName: string;
   ecosystem: string;
   isVulnerable: boolean;
   vulnCount: number;
@@ -31,7 +32,7 @@ export default function DependencyTree({ dependencies }: Props) {
     svg.selectAll("*").remove();
 
     const width = 800;
-    const height = 500;
+    const height = 600;
 
     // Build nodes and links
     // Center node represents the project
@@ -39,6 +40,7 @@ export default function DependencyTree({ dependencies }: Props) {
       {
         id: "project",
         name: "Project",
+        fullName: "Project",
         ecosystem: "",
         isVulnerable: false,
         vulnCount: 0,
@@ -53,6 +55,7 @@ export default function DependencyTree({ dependencies }: Props) {
     const ecosystemNodes: SimNode[] = ecosystems.map((eco) => ({
       id: `eco-${eco}`,
       name: eco,
+      fullName: eco,
       ecosystem: eco,
       isVulnerable: false,
       vulnCount: 0,
@@ -69,7 +72,8 @@ export default function DependencyTree({ dependencies }: Props) {
       const vulnCount = dep.vulnerabilities?.length || 0;
       nodes.push({
         id: `dep-${dep.id}`,
-        name: `${dep.name}@${dep.version}`,
+        name: dep.name,
+        fullName: `${dep.name}@${dep.version}`,
         ecosystem: dep.ecosystem,
         isVulnerable: dep.is_vulnerable,
         vulnCount,
@@ -106,12 +110,12 @@ export default function DependencyTree({ dependencies }: Props) {
           .id((d) => d.id)
           .distance((link) => {
             const src = link.source as SimNode;
-            if (src.isCenter) return 120;
-            if (src.id.startsWith("eco-")) return 60;
+            if (src.isCenter) return 150;
+            if (src.id.startsWith("eco-")) return 80;
             return 40;
           })
       )
-      .force("charge", d3.forceManyBody().strength(-80))
+      .force("charge", d3.forceManyBody().strength(-120))
       .force("center", d3.forceCenter(width / 2, height / 2))
       .force(
         "collision",
@@ -200,13 +204,28 @@ export default function DependencyTree({ dependencies }: Props) {
       .attr("font-size", (d) => (d.isCenter ? 13 : 11))
       .attr("font-weight", 500);
 
+    // Labels for dependency nodes
+    const depLabels = nodeElements
+      .filter((d) => !d.isCenter && !d.id.startsWith("eco-"))
+      .append("text")
+      .text((d) => d.name)
+      .attr("text-anchor", (d) => ((d.x ?? 0) < width / 2 ? "start" : "end"))
+      .attr("dx", (d) =>
+        (d.x ?? 0) < width / 2 ? nodeRadius(d) + 4 : -(nodeRadius(d) + 4)
+      )
+      .attr("dy", "0.35em")
+      .attr("fill", colors.onSurface)
+      .attr("fill-opacity", 0.85)
+      .attr("font-size", 9)
+      .attr("font-weight", 400);
+
     // Tooltip on hover for dependency nodes
     nodeElements
       .filter((d) => !d.isCenter && !d.id.startsWith("eco-"))
       .append("title")
       .text(
         (d) =>
-          `${d.name}\n${d.ecosystem}${d.isVulnerable ? `\n${d.vulnCount} vulnerabilit${d.vulnCount === 1 ? "y" : "ies"}` : ""}`
+          `${d.fullName}\n${d.ecosystem}${d.isVulnerable ? `\n${d.vulnCount} vulnerabilit${d.vulnCount === 1 ? "y" : "ies"}` : ""}`
       );
 
     // Simulation tick
@@ -218,6 +237,12 @@ export default function DependencyTree({ dependencies }: Props) {
         .attr("y2", (d) => (d.target as SimNode).y!);
 
       nodeElements.attr("transform", (d) => `translate(${d.x},${d.y})`);
+
+      depLabels
+        .attr("text-anchor", (d) => ((d.x ?? 0) < width / 2 ? "start" : "end"))
+        .attr("dx", (d) =>
+          (d.x ?? 0) < width / 2 ? nodeRadius(d) + 4 : -(nodeRadius(d) + 4)
+        );
     });
 
     // Legend
@@ -247,7 +272,7 @@ export default function DependencyTree({ dependencies }: Props) {
   }, [dependencies]);
 
   return (
-    <div className="card" style={{ minHeight: 350 }}>
+    <div className="card" style={{ minHeight: 420 }}>
       <h3
         style={{
           fontSize: 16,
@@ -286,7 +311,7 @@ export default function DependencyTree({ dependencies }: Props) {
       ) : (
         <svg
           ref={svgRef}
-          viewBox="0 0 800 500"
+          viewBox="0 0 800 600"
           width="100%"
           style={{
             borderRadius: 16,

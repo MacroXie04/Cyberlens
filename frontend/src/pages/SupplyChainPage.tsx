@@ -8,6 +8,7 @@ import AiRemediationReport from "../components/SupplyChain/AiRemediationReport";
 import CodeScanLiveView from "../components/SupplyChain/CodeScanLiveView";
 import CodeSecurityFindings from "../components/SupplyChain/CodeSecurityFindings";
 import DependencyInventory from "../components/SupplyChain/DependencyInventory";
+import DependencyList from "../components/SupplyChain/DependencyList";
 import DependencyTree from "../components/SupplyChain/DependencyTree";
 import ScanProgress from "../components/SupplyChain/ScanProgress";
 import VulnerabilityList from "../components/SupplyChain/VulnerabilityList";
@@ -1096,6 +1097,7 @@ export default function SupplyChainPage({ selectedProject }: Props) {
                       <>
                         <DependencyInventory dependencies={dependencies} />
                         <DependencyTree dependencies={dependencies} />
+                        <DependencyList dependencies={dependencies} />
                       </>
                     ) : (
                       <InlineScanNotice message="No dependency inventory is available for the selected scan." />

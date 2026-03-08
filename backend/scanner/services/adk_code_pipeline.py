@@ -8,9 +8,10 @@ import re
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cached_property
 
+from django.db import connections
 from django.utils import timezone
 from google.adk import Agent
 from google.adk.agents.run_config import StreamingMode
@@ -342,6 +343,23 @@ def _detect_language(file_path: str) -> str:
 
 def _get_scan_profile(scan_mode: str | None) -> ScanProfile:
     return FULL_SCAN_PROFILE if scan_mode == GitHubScan.Mode.FULL else FAST_SCAN_PROFILE
+
+
+def _get_runtime_scan_profile(
+    profile: ScanProfile,
+    *,
+    database_vendor: str | None = None,
+) -> ScanProfile:
+    vendor = database_vendor or connections["default"].vendor
+    if vendor != "sqlite":
+        return profile
+    if profile.chunk_workers <= 1 and profile.verification_workers <= 1:
+        return profile
+    logger.info(
+        "SQLite backend detected; forcing serial code scan execution for %s mode",
+        profile.mode,
+    )
+    return replace(profile, chunk_workers=1, verification_workers=1)
 
 
 def _resolve_model_name(user_id: int | None, profile: ScanProfile) -> str:
@@ -2068,7 +2086,7 @@ def scan_code_security_github(
 
     scan = GitHubScan.objects.get(id=scan_id)
     _reset_code_scan_state(scan)
-    profile = _get_scan_profile(scan.scan_mode)
+    profile = _get_runtime_scan_profile(_get_scan_profile(scan.scan_mode))
     api_key = get_google_api_key(user_id=user_id)
     model_name = _resolve_model_name(user_id, profile)
     if not api_key:
@@ -2129,7 +2147,7 @@ def scan_code_security(scan_id: int, dir_path: str, user_id: int | None = None) 
 
     scan = GitHubScan.objects.get(id=scan_id)
     _reset_code_scan_state(scan)
-    profile = _get_scan_profile(scan.scan_mode)
+    profile = _get_runtime_scan_profile(_get_scan_profile(scan.scan_mode))
     api_key = get_google_api_key(user_id=user_id)
     model_name = _resolve_model_name(user_id, profile)
     if not api_key:

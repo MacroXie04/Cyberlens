@@ -33,3 +33,7 @@ docker-compose.override.yml
 
 # Logs
 *.log
+
+# Frontend UI (C/C++ build artifacts)
+frontend_ui/bin/
+frontend_ui/objects/
