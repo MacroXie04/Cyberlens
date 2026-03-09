@@ -2,41 +2,11 @@ import { useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 
 import type { Dependency } from "../../types";
+import DependencyInventoryTable from "./DependencyInventoryTable";
+import { buildDependencyRows, type SortKey, type VulnerabilityFilter } from "./dependencyInventoryUtils";
 
 interface Props {
   dependencies: Dependency[];
-}
-
-type VulnerabilityFilter = "all" | "vulnerable" | "safe";
-type SortKey = "name" | "ecosystem" | "vulns" | "severity";
-
-const severityRank: Record<string, number> = {
-  critical: 4,
-  high: 3,
-  medium: 2,
-  low: 1,
-  info: 0,
-  "": -1,
-};
-
-function highestSeverity(dependency: Dependency): string {
-  const severities = (dependency.vulnerabilities || []).map((item) => item.severity || "");
-  return severities.sort((left, right) => (severityRank[right] || 0) - (severityRank[left] || 0))[0] || "";
-}
-
-function severityColor(severity: string): string {
-  switch (severity) {
-    case "critical":
-      return "var(--md-error)";
-    case "high":
-      return "#ff7043";
-    case "medium":
-      return "var(--md-warning)";
-    case "low":
-      return "var(--md-primary)";
-    default:
-      return "var(--md-on-surface-variant)";
-  }
 }
 
 export default function DependencyInventory({ dependencies }: Props) {
@@ -51,28 +21,7 @@ export default function DependencyInventory({ dependencies }: Props) {
   );
 
   const rows = useMemo(() => {
-    const filtered = dependencies.filter((dependency) => {
-      const matchesSearch =
-        search.trim() === "" ||
-        dependency.name.toLowerCase().includes(search.toLowerCase()) ||
-        dependency.version.toLowerCase().includes(search.toLowerCase());
-      const matchesEcosystem =
-        ecosystemFilter === "all" || dependency.ecosystem === ecosystemFilter;
-      const matchesVulnerability =
-        vulnerabilityFilter === "all" ||
-        (vulnerabilityFilter === "vulnerable" ? dependency.is_vulnerable : !dependency.is_vulnerable);
-
-      return matchesSearch && matchesEcosystem && matchesVulnerability;
-    });
-
-    return filtered.sort((left, right) => {
-      if (sortKey === "name") return left.name.localeCompare(right.name);
-      if (sortKey === "ecosystem") return left.ecosystem.localeCompare(right.ecosystem);
-      if (sortKey === "severity") {
-        return (severityRank[highestSeverity(right)] || 0) - (severityRank[highestSeverity(left)] || 0);
-      }
-      return (right.vulnerabilities?.length || 0) - (left.vulnerabilities?.length || 0);
-    });
+    return buildDependencyRows(dependencies, search, ecosystemFilter, vulnerabilityFilter, sortKey);
   }, [dependencies, ecosystemFilter, search, sortKey, vulnerabilityFilter]);
 
   return (
@@ -126,59 +75,7 @@ export default function DependencyInventory({ dependencies }: Props) {
         </select>
       </div>
 
-      <div style={{ marginTop: 16, overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 860 }}>
-          <thead>
-            <tr style={{ textAlign: "left", borderBottom: "1px solid var(--md-outline-variant)" }}>
-              {["Package", "Version", "Ecosystem", "Vulnerabilities", "Highest Severity", "Fix Version"].map((label) => (
-                <th
-                  key={label}
-                  style={{
-                    padding: "12px 10px",
-                    fontSize: 11,
-                    letterSpacing: 0.6,
-                    textTransform: "uppercase",
-                    color: "var(--md-on-surface-variant)",
-                  }}
-                >
-                  {label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr>
-                <td colSpan={6} style={{ padding: "28px 10px", textAlign: "center", color: "var(--md-on-surface-variant)" }}>
-                  No dependencies match the current filters.
-                </td>
-              </tr>
-            ) : (
-              rows.map((dependency) => {
-                const fixVersion =
-                  dependency.vulnerabilities?.find((item) => item.fixed_version)?.fixed_version || "-";
-                const severity = highestSeverity(dependency);
-                return (
-                  <tr key={dependency.id} style={{ borderBottom: "1px solid var(--md-outline-variant)" }}>
-                    <td style={cellStyle}>
-                      <div style={{ fontWeight: 700, color: "var(--md-on-surface)" }}>{dependency.name}</div>
-                    </td>
-                    <td style={cellStyle}>{dependency.version || "-"}</td>
-                    <td style={cellStyle}>{dependency.ecosystem || "-"}</td>
-                    <td style={cellStyle}>{(dependency.vulnerabilities?.length || 0).toLocaleString()}</td>
-                    <td style={cellStyle}>
-                      <span style={{ color: severityColor(severity), fontWeight: 700 }}>
-                        {severity || (dependency.is_vulnerable ? "unknown" : "none")}
-                      </span>
-                    </td>
-                    <td style={cellStyle}>{fixVersion}</td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+      <DependencyInventoryTable rows={rows} />
 
       <style>{`
         @media (max-width: 960px) {
@@ -199,11 +96,4 @@ const inputStyle: CSSProperties = {
   color: "var(--md-on-surface)",
   padding: "0 12px",
   fontSize: 13,
-};
-
-const cellStyle: CSSProperties = {
-  padding: "14px 10px",
-  fontSize: 13,
-  color: "var(--md-on-surface-variant)",
-  verticalAlign: "top",
 };

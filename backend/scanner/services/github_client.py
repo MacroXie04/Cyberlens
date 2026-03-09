@@ -1,88 +1,27 @@
-import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import requests
+
+from .github_client_support import (
+    GITHUB_API,
+    MANIFEST_FILES,
+    MAX_FETCH_WORKERS,
+    MAX_FILE_SIZE,
+    MAX_MANIFEST_FILE_SIZE,
+    GitHubRepositoryFetchError,
+    headers as _headers,
+    is_source_candidate as _is_source_candidate,
+    should_skip_path as _should_skip_path,
+)
 
 logger = logging.getLogger(__name__)
 
 
-class GitHubRepositoryFetchError(RuntimeError):
-    """Raised when repository metadata cannot be fetched from GitHub."""
-
-GITHUB_API = "https://api.github.com"
-
-SOURCE_EXTENSIONS = {
-    ".py",
-    ".js",
-    ".ts",
-    ".jsx",
-    ".tsx",
-    ".go",
-    ".rb",
-    ".java",
-    ".php",
-    ".html",
-    ".json",
-    ".sql",
-    ".yml",
-    ".yaml",
-    ".toml",
-    ".swift",
-    ".m",
-    ".mm",
-    ".h",
-    ".c",
-    ".cc",
-    ".cpp",
-    ".kt",
-    ".kts",
-}
-SOURCE_FILENAMES = {
-    "package.json",
-    "package-lock.json",
-    "requirements.txt",
-    "Pipfile",
-    "pyproject.toml",
-    "go.mod",
-    "pom.xml",
-    "Gemfile",
-    "Dockerfile",
-    "docker-compose.yml",
-    "docker-compose.yaml",
-    "tsconfig.json",
-}
-SKIP_PATHS = {"node_modules/", "__pycache__/", ".git/", "dist/", "venv/", ".venv/", "build/", "vendor/"}
-MAX_FILE_SIZE = 50 * 1024  # 50KB
-MAX_MANIFEST_FILE_SIZE = 512 * 1024  # 512KB
-MAX_FETCH_WORKERS = max(1, int(os.getenv("GITHUB_FETCH_WORKERS", "4")))
-
-# Manifest files to look for in repositories
-MANIFEST_FILES = [
-    "package.json",
-    "package-lock.json",
-    "requirements.txt",
-    "Pipfile",
-    "pyproject.toml",
-    "go.mod",
-    "pom.xml",
-    "Gemfile",
-]
-
-
-def _headers(pat: str) -> dict:
-    return {
-        "Authorization": f"Bearer {pat}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-
-
 def validate_token(pat: str) -> dict | None:
     try:
-        resp = requests.get(f"{GITHUB_API}/user", headers=_headers(pat), timeout=10)
-        if resp.status_code == 200:
-            return resp.json()
-        return None
+        response = requests.get(f"{GITHUB_API}/user", headers=_headers(pat), timeout=10)
+        return response.json() if response.status_code == 200 else None
     except requests.RequestException:
         logger.exception("GitHub token validation failed")
         return None
@@ -90,28 +29,28 @@ def validate_token(pat: str) -> dict | None:
 
 def list_repos(pat: str, per_page: int = 30) -> list[dict]:
     try:
-        resp = requests.get(
+        response = requests.get(
             f"{GITHUB_API}/user/repos",
             headers=_headers(pat),
             params={"per_page": per_page, "sort": "updated"},
             timeout=10,
         )
-        resp.raise_for_status()
+        response.raise_for_status()
         return [
             {
-                "full_name": r["full_name"],
-                "name": r["name"],
-                "private": r["private"],
-                "language": r.get("language"),
-                "updated_at": r["updated_at"],
-                "description": r.get("description") or "",
-                "stargazers_count": r.get("stargazers_count", 0),
-                "forks_count": r.get("forks_count", 0),
-                "open_issues_count": r.get("open_issues_count", 0),
-                "default_branch": r.get("default_branch", "main"),
-                "html_url": r.get("html_url", ""),
+                "full_name": repo["full_name"],
+                "name": repo["name"],
+                "private": repo["private"],
+                "language": repo.get("language"),
+                "updated_at": repo["updated_at"],
+                "description": repo.get("description") or "",
+                "stargazers_count": repo.get("stargazers_count", 0),
+                "forks_count": repo.get("forks_count", 0),
+                "open_issues_count": repo.get("open_issues_count", 0),
+                "default_branch": repo.get("default_branch", "main"),
+                "html_url": repo.get("html_url", ""),
             }
-            for r in resp.json()
+            for repo in response.json()
         ]
     except requests.RequestException:
         logger.exception("Failed to list repos")
@@ -120,14 +59,12 @@ def list_repos(pat: str, per_page: int = 30) -> list[dict]:
 
 def get_file_content(pat: str, owner: str, repo: str, path: str) -> str | None:
     try:
-        resp = requests.get(
+        response = requests.get(
             f"{GITHUB_API}/repos/{owner}/{repo}/contents/{path}",
             headers={**_headers(pat), "Accept": "application/vnd.github.raw+json"},
             timeout=10,
         )
-        if resp.status_code == 200:
-            return resp.text
-        return None
+        return response.text if response.status_code == 200 else None
     except requests.RequestException:
         return None
 
@@ -135,54 +72,32 @@ def get_file_content(pat: str, owner: str, repo: str, path: str) -> str | None:
 def _get_repo_tree(pat: str, repo_full_name: str) -> list[dict]:
     owner, repo = repo_full_name.split("/", 1)
     try:
-        repo_resp = requests.get(
-            f"{GITHUB_API}/repos/{owner}/{repo}",
-            headers=_headers(pat),
-            timeout=10,
-        )
-        repo_resp.raise_for_status()
-        default_branch = repo_resp.json().get("default_branch", "main")
-
-        tree_resp = requests.get(
+        repo_response = requests.get(f"{GITHUB_API}/repos/{owner}/{repo}", headers=_headers(pat), timeout=10)
+        repo_response.raise_for_status()
+        default_branch = repo_response.json().get("default_branch", "main")
+        tree_response = requests.get(
             f"{GITHUB_API}/repos/{owner}/{repo}/git/trees/{default_branch}",
             headers=_headers(pat),
             params={"recursive": "1"},
             timeout=30,
         )
-        tree_resp.raise_for_status()
-        return tree_resp.json().get("tree", [])
+        tree_response.raise_for_status()
+        return tree_response.json().get("tree", [])
     except requests.RequestException as exc:
         logger.exception("Failed to fetch repo tree for %s", repo_full_name)
-        raise GitHubRepositoryFetchError(
-            f"Failed to fetch repo tree for {repo_full_name}: {exc}"
-        ) from exc
+        raise GitHubRepositoryFetchError(f"Failed to fetch repo tree for {repo_full_name}: {exc}") from exc
 
 
-def _should_skip_path(path: str) -> bool:
-    return any(skip in path for skip in SKIP_PATHS)
-
-
-def _fetch_repo_files(
-    pat: str,
-    owner: str,
-    repo: str,
-    paths: list[str],
-    *,
-    max_workers: int | None = None,
-) -> dict[str, str]:
-    found = {}
+def _fetch_repo_files(pat: str, owner: str, repo: str, paths: list[str], *, max_workers: int | None = None) -> dict[str, str]:
     if not paths:
-        return found
+        return {}
     if len(paths) == 1:
         content = get_file_content(pat, owner, repo, paths[0])
         return {paths[0]: content} if content is not None else {}
-
+    found = {}
     worker_count = max_workers if max_workers is not None else MAX_FETCH_WORKERS
     with ThreadPoolExecutor(max_workers=min(max(1, worker_count), len(paths))) as executor:
-        future_map = {
-            executor.submit(get_file_content, pat, owner, repo, path): path
-            for path in paths
-        }
+        future_map = {executor.submit(get_file_content, pat, owner, repo, path): path for path in paths}
         for future in as_completed(future_map):
             path = future_map[future]
             try:
@@ -196,57 +111,28 @@ def _fetch_repo_files(
 
 
 def get_dependency_files(pat: str, repo_full_name: str) -> dict[str, str]:
-    """Fetch detectable dependency manifest files from any repo subdirectory."""
     owner, repo = repo_full_name.split("/", 1)
-    tree = _get_repo_tree(pat, repo_full_name)
     manifest_paths = []
-    for item in tree:
-        if item.get("type") != "blob":
-            continue
+    for item in _get_repo_tree(pat, repo_full_name):
         path = item.get("path", "")
-        if _should_skip_path(path):
+        if item.get("type") != "blob" or _should_skip_path(path):
             continue
         if path.rsplit("/", 1)[-1] not in MANIFEST_FILES:
             continue
-        size = item.get("size", 0)
-        if size == 0 or size > MAX_MANIFEST_FILE_SIZE:
+        if not 0 < item.get("size", 0) <= MAX_MANIFEST_FILE_SIZE:
             continue
         manifest_paths.append(path)
     return _fetch_repo_files(pat, owner, repo, manifest_paths)
 
 
-def _is_source_candidate(path: str) -> bool:
-    base = path.rsplit("/", 1)[-1]
-    return any(path.endswith(ext) for ext in SOURCE_EXTENSIONS) or base in SOURCE_FILENAMES or base.startswith(".env")
-
-
-def get_source_files(
-    pat: str,
-    repo_full_name: str,
-    *,
-    max_workers: int | None = None,
-) -> dict[str, str]:
-    """Fetch source code files from a GitHub repo for security analysis."""
+def get_source_files(pat: str, repo_full_name: str, *, max_workers: int | None = None) -> dict[str, str]:
     owner, repo = repo_full_name.split("/", 1)
-    tree = _get_repo_tree(pat, repo_full_name)
-    if not tree:
-        return {}
-
     source_paths = []
-    for item in tree:
-        if item.get("type") != "blob":
-            continue
+    for item in _get_repo_tree(pat, repo_full_name):
         path = item.get("path", "")
-        # Skip non-source files
-        if not _is_source_candidate(path):
+        if item.get("type") != "blob" or not _is_source_candidate(path) or _should_skip_path(path):
             continue
-        # Skip blacklisted directories
-        if _should_skip_path(path):
-            continue
-        # Skip large files
-        size = item.get("size", 0)
-        if size > MAX_FILE_SIZE or size == 0:
+        if not 0 < item.get("size", 0) <= MAX_FILE_SIZE:
             continue
         source_paths.append(path)
-
     return _fetch_repo_files(pat, owner, repo, source_paths, max_workers=max_workers)
