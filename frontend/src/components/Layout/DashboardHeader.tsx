@@ -1,13 +1,12 @@
 import type { AuthUser, SelectedProject } from "../../types";
 
-type Tab = "monitor" | "supply-chain" | "settings";
+type Tab = "supply-chain" | "settings";
 
 interface Props {
   activeTab: Tab;
   onTabChange: (tab: Tab) => void;
   selectedProject: SelectedProject;
   adkKeySet: boolean;
-  cloudRunUrl?: string | null;
   connected: boolean;
   authUser?: AuthUser;
   onLogout?: () => void;
@@ -56,7 +55,6 @@ export default function DashboardHeader({
   onTabChange,
   selectedProject,
   adkKeySet,
-  cloudRunUrl,
   connected,
   authUser,
   onLogout,
@@ -70,14 +68,12 @@ export default function DashboardHeader({
       </div>
 
       <div className="tabs">
-        <button className={`tab ${activeTab === "monitor" ? "active" : ""}`} onClick={() => onTabChange("monitor")}>Live Monitor</button>
         <button className={`tab ${activeTab === "supply-chain" ? "active" : ""}`} onClick={() => onTabChange("supply-chain")}>Code Scan</button>
         <button className={`tab ${activeTab === "settings" ? "active" : ""}`} onClick={() => onTabChange("settings")}>Settings</button>
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <StatusChip label="Gemini" active={adkKeySet} title={adkKeySet ? "Gemini API connected" : "Gemini API key not configured"} />
-        {cloudRunUrl ? <StatusChip label="Cloud Run" active={connected} title={cloudRunUrl} /> : null}
         {authUser ? (
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", background: "var(--md-surface-container)", border: "1px solid var(--md-outline-variant)", borderRadius: "var(--md-radius-chip)", fontSize: 13, color: "var(--md-on-surface)" }}>
             <span style={{ fontWeight: 500 }}>{authUser.username}</span>

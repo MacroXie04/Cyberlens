@@ -19,17 +19,6 @@ afterEach(() => {
 });
 
 describe("API endpoint helpers", () => {
-  it("switches monitor endpoints to remote URL and resets to local", async () => {
-    api.setMonitorBaseUrl("https://remote.example.com/");
-    mockFetch.mockReturnValueOnce(jsonResponse({ results: [], count: 0 }));
-    await api.getRequests();
-    expect(mockFetch.mock.calls[0][0]).toBe("https://remote.example.com/api/requests/");
-    api.setMonitorBaseUrl(null);
-    mockFetch.mockReturnValueOnce(jsonResponse({ results: [], count: 0 }));
-    await api.getRequests();
-    expect(mockFetch.mock.calls[1][0]).toBe("/api/requests/");
-  });
-
   it("covers auth and scanner endpoints", async () => {
     Object.defineProperty(document, "cookie", { writable: true, value: "csrftoken=test-token" });
     mockFetch.mockReturnValueOnce(jsonResponse({ user: { id: 1, username: "new", email: "n@b.com" } }));

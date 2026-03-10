@@ -1,5 +1,4 @@
 import { fetchJson, getLocalBaseUrl } from "../../../shared/api/client";
-import type { GcpSettings } from "../types";
 
 const LOCAL_BASE = getLocalBaseUrl();
 
@@ -28,16 +27,3 @@ export const testApiKey = () =>
     `${LOCAL_BASE}/settings/test-key/`,
     { method: "POST" }
   );
-
-export const getGcpSettings = () => fetchJson<GcpSettings>(`${LOCAL_BASE}/settings/gcp/`);
-
-export const updateGcpSettings = (data: {
-  gcp_project_id?: string;
-  gcp_service_name?: string;
-  gcp_region?: string;
-  gcp_service_account_key?: string;
-}) =>
-  fetchJson<GcpSettings>(`${LOCAL_BASE}/settings/gcp/`, {
-    method: "PUT",
-    body: JSON.stringify(data),
-  });

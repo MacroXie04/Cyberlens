@@ -26,7 +26,7 @@ io.use(async (socket, next) => {
       return next(new Error("Authentication error: No cookies provided"));
     }
     const backendUrl = process.env.BACKEND_URL || "http://backend:8000";
-    const response = await fetch(`${backendUrl}/api/verify-session/`, {
+    const response = await fetch(`${backendUrl}/api/auth/verify-session/`, {
       headers: { cookie },
     });
 

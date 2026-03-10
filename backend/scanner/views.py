@@ -12,7 +12,7 @@ from .api.common import get_user_settings as _get_user_settings
 from .api.github_auth import connect_response, disconnect_response, github_status_response, repos_response
 from .api.scan_results import adk_trace_response, ai_report_response, code_findings_response, scan_detail_response
 from .api.scan_runs import local_projects_response, local_scan_response, scan_response, scans_response
-from .api.settings import available_models_response, gcp_settings_response, settings_response, test_api_key_response
+from .api.settings import available_models_response, settings_response, test_api_key_response
 from .services.adk_trace import build_trace_snapshot
 from .services.github_client import list_repos, validate_token
 from .services.local_client import list_local_projects, validate_local_path
@@ -132,11 +132,6 @@ def available_models(request):
         get_user_settings=_get_user_settings,
         get_google_api_key=get_google_api_key,
     )
-
-
-@api_view(["GET", "PUT"])
-def gcp_settings_view(request):
-    return gcp_settings_response(request, get_user_settings=_get_user_settings)
 
 
 @api_view(["GET"])

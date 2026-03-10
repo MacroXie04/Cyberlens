@@ -18,7 +18,6 @@ vi.mock("../hooks/useSocket", () => ({
   useSocket: () => ({ connected: false, emit: vi.fn() }),
 }));
 
-vi.mock("../pages/LiveMonitorPage", () => ({ default: () => <div data-testid="live-monitor">LiveMonitor</div> }));
 vi.mock("../pages/SupplyChainPage", () => ({ default: () => <div data-testid="supply-chain">SupplyChain</div> }));
 vi.mock("../pages/SettingsPage", () => ({ default: () => <div data-testid="settings-page">Settings</div> }));
 
@@ -51,31 +50,29 @@ describe("App authentication flow", () => {
     await user.type(screen.getByPlaceholderText("Username"), "testuser");
     await user.type(screen.getByPlaceholderText("Password"), "password");
     await user.click(screen.getByRole("button", { name: "Sign In" }));
-    await waitFor(() => expect(screen.getByTestId("live-monitor")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("supply-chain")).toBeInTheDocument());
   });
 
   it("logs out and returns to login page", async () => {
     const user = userEvent.setup();
     mockLogout.mockResolvedValue({ status: "ok" });
     renderApp("/");
-    await waitFor(() => expect(screen.getByTestId("live-monitor")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("supply-chain")).toBeInTheDocument());
     await user.click(screen.getByTitle("Sign out"));
     await waitFor(() => expect(screen.getByText("Sign in to your account")).toBeInTheDocument());
   });
 });
 
 describe("Dashboard tabs", () => {
-  it("shows Live Monitor tab by default", async () => {
+  it("shows Code Scan tab by default", async () => {
     renderApp("/");
-    await waitFor(() => expect(screen.getByTestId("live-monitor")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("supply-chain")).toBeInTheDocument());
   });
 
-  it("switches to Code Scan and Settings tabs", async () => {
+  it("switches to Settings tab", async () => {
     const user = userEvent.setup();
     renderApp("/");
-    await waitFor(() => expect(screen.getByTestId("live-monitor")).toBeInTheDocument());
-    await user.click(await screen.findByText("Code Scan"));
-    expect(screen.getByTestId("supply-chain")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("supply-chain")).toBeInTheDocument());
     await user.click(screen.getAllByText("Settings")[0]);
     await waitFor(() => expect(screen.getByTestId("settings-page")).toBeInTheDocument());
   });

@@ -48,6 +48,13 @@ def logout_view(request):
 
 
 @api_view(["GET"])
+def verify_session(request):
+    if request.user.is_authenticated:
+        return Response({"status": "authenticated"})
+    return Response({"error": "unauthenticated"}, status=status.HTTP_401_UNAUTHORIZED)
+
+
+@api_view(["GET"])
 @permission_classes([AllowAny])
 @ensure_csrf_cookie
 def me_view(request):

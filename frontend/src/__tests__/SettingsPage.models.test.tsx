@@ -8,7 +8,6 @@ import { getAvailableModels, getRepos, updateSettings } from "../services/api";
 
 vi.mock("../services/api", () => ({ updateSettings: vi.fn(), testApiKey: vi.fn(), getRepos: vi.fn(), getAvailableModels: vi.fn() }));
 vi.mock("../components/SupplyChain/GitHubConnect", () => ({ default: () => <div data-testid="github-connect">GitHubConnect</div> }));
-vi.mock("../components/Settings/GcpLoggingConfig", () => ({ default: () => <div data-testid="gcp-logging">GcpLoggingConfig</div> }));
 
 const mockUpdateSettings = vi.mocked(updateSettings);
 const mockGetAvailableModels = vi.mocked(getAvailableModels);
@@ -47,7 +46,6 @@ describe("SettingsPage model selector", () => {
     await waitFor(() => expect(screen.getByRole("combobox")).toBeInTheDocument());
     await user.selectOptions(screen.getByRole("combobox"), "gemini-2.5-pro");
     await waitFor(() => expect(onModelChange).toHaveBeenCalledWith("gemini-2.5-pro"));
-    expect(screen.getByTestId("gcp-logging")).toBeInTheDocument();
     expect(screen.getByTestId("github-connect")).toBeInTheDocument();
   });
 });

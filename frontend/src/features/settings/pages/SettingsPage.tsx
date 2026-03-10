@@ -1,4 +1,3 @@
-import GcpLoggingConfig from "../../../components/Settings/GcpLoggingConfig";
 import type { SettingsPageProps } from "../types";
 import GeminiSettingsCard from "../components/GeminiSettingsCard";
 import RepoSourceCard from "../components/RepoSourceCard";
@@ -30,19 +29,6 @@ export default function SettingsPage({
       <h2 style={{ fontSize: 20, fontWeight: 600, color: "var(--md-on-surface)", marginBottom: 8 }}>
         Settings
       </h2>
-      <div className="card">
-        <h3 style={{ fontSize: 16, fontWeight: 500, color: "var(--md-on-surface)", marginBottom: 4 }}>
-          GCP Cloud Logging
-        </h3>
-        <p style={{ fontSize: 13, color: "var(--md-on-surface-variant)", marginBottom: 16 }}>
-          Connect Google Cloud so Live Monitor can discover Cloud Run services,
-          read Cloud Logging, and fetch Cloud Monitoring metrics. Recommended
-          roles: <code>roles/logging.viewer</code>, <code>roles/monitoring.viewer</code>, and{" "}
-          <code>roles/run.viewer</code>. Also ensure the Cloud Run Admin API and
-          Cloud Monitoring API are enabled.
-        </p>
-        <GcpLoggingConfig />
-      </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "start" }}>
         <GeminiSettingsCard
           availableModels={settingsData.availableModels}

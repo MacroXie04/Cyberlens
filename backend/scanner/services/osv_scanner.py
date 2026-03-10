@@ -3,7 +3,7 @@ import logging
 from celery import shared_task
 from django.utils import timezone
 
-from monitor.services.redis_publisher import publish_scan_complete, publish_scan_progress
+from cyberlens.redis_publisher import publish_scan_complete, publish_scan_progress
 from scanner.models import Dependency, GitHubScan, Vulnerability
 
 from .ai_reporter import generate_report

@@ -16,7 +16,6 @@ vi.mock("../hooks/useSocket", () => ({
   useSocket: () => ({ connected: false, emit: vi.fn() }),
 }));
 
-vi.mock("../pages/LiveMonitorPage", () => ({ default: () => <div data-testid="live-monitor">LiveMonitor</div> }));
 vi.mock("../pages/SupplyChainPage", () => ({ default: () => <div data-testid="supply-chain">SupplyChain</div> }));
 vi.mock("../pages/SettingsPage", () => ({ default: () => <div data-testid="settings-page">Settings</div> }));
 
@@ -64,16 +63,16 @@ describe("App routing", () => {
     renderApp("/");
     await waitFor(() => {
       expect(screen.getByText("testuser")).toBeInTheDocument();
-      expect(screen.getByTestId("live-monitor")).toBeInTheDocument();
+      expect(screen.getByTestId("supply-chain")).toBeInTheDocument();
     });
   });
 
   it("redirects authenticated users from /login and /register to dashboard", async () => {
     mockGetMe.mockResolvedValue({ authenticated: true, user: fakeUser });
     const loginView = renderApp("/login");
-    await waitFor(() => expect(screen.getByTestId("live-monitor")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("supply-chain")).toBeInTheDocument());
     loginView.unmount();
     renderApp("/register");
-    await waitFor(() => expect(screen.getByTestId("live-monitor")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("supply-chain")).toBeInTheDocument());
   });
 });

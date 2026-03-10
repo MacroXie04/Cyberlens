@@ -8,7 +8,6 @@ import { getAvailableModels, getRepos, testApiKey, updateSettings } from "../ser
 
 vi.mock("../services/api", () => ({ updateSettings: vi.fn(), testApiKey: vi.fn(), getRepos: vi.fn(), getAvailableModels: vi.fn() }));
 vi.mock("../components/SupplyChain/GitHubConnect", () => ({ default: () => <div data-testid="github-connect">GitHubConnect</div> }));
-vi.mock("../components/Settings/GcpLoggingConfig", () => ({ default: () => <div data-testid="gcp-logging">GcpLoggingConfig</div> }));
 
 const mockUpdateSettings = vi.mocked(updateSettings);
 const mockTestApiKey = vi.mocked(testApiKey);

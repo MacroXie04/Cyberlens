@@ -1,6 +1,6 @@
 import logging
 
-from monitor.services.redis_publisher import publish_code_scan_stream
+from cyberlens.redis_publisher import publish_code_scan_stream
 from scanner.models import GitHubScan
 
 from .code_pipeline import CandidateBatch, CandidateSpec, ChunkSummary, FAST_SCAN_PROFILE, FULL_SCAN_PROFILE, RepoSynthesisReport, VerificationDecision, get_runtime_scan_profile, get_scan_profile

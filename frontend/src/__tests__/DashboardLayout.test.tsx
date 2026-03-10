@@ -19,7 +19,7 @@ beforeEach(() => {
 
 function renderLayout(props: Partial<Parameters<typeof DashboardLayout>[0]> = {}) {
   const defaults = {
-    activeTab: "monitor" as const,
+    activeTab: "supply-chain" as const,
     onTabChange: vi.fn(),
     selectedProject: null,
     adkKeySet: false,
@@ -48,17 +48,16 @@ describe("DashboardLayout", () => {
     expect(screen.getByTestId("child-content")).toBeInTheDocument();
   });
 
-  it("renders three tab buttons", () => {
+  it("renders two tab buttons", () => {
     renderLayout();
 
-    expect(screen.getByText("Live Monitor")).toBeInTheDocument();
     expect(screen.getByText("Code Scan")).toBeInTheDocument();
     expect(screen.getByText("Settings")).toBeInTheDocument();
   });
 
   it("calls onTabChange when clicking a tab", async () => {
     const user = userEvent.setup();
-    const { onTabChange } = renderLayout();
+    const { onTabChange } = renderLayout({ activeTab: "settings" });
 
     await user.click(screen.getByText("Code Scan"));
 
@@ -121,17 +120,5 @@ describe("DashboardLayout", () => {
 
     expect(screen.getByText("org/my-repo")).toBeInTheDocument();
     expect(screen.getByText("GitHub")).toBeInTheDocument();
-  });
-
-  it("shows Cloud Run chip when cloudRunUrl is set", () => {
-    renderLayout({ cloudRunUrl: "https://myapp.run.app" });
-
-    expect(screen.getByText("Cloud Run")).toBeInTheDocument();
-  });
-
-  it("does not show Cloud Run chip when cloudRunUrl is null", () => {
-    renderLayout({ cloudRunUrl: null });
-
-    expect(screen.queryByText("Cloud Run")).not.toBeInTheDocument();
   });
 });

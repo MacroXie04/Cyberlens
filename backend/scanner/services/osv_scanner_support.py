@@ -3,7 +3,7 @@ import logging
 import requests
 from django.utils import timezone
 
-from monitor.services.redis_publisher import publish_scan_complete
+from cyberlens.redis_publisher import publish_scan_complete
 from scanner.models import GitHubScan
 
 logger = logging.getLogger(__name__)

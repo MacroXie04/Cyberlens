@@ -1,16 +1,7 @@
 const LOCAL_BASE = "/api";
-let monitorBase = "/api";
 
 export function getLocalBaseUrl() {
   return LOCAL_BASE;
-}
-
-export function setMonitorBaseUrl(url: string | null) {
-  monitorBase = url ? `${url.replace(/\/$/, "")}/api` : "/api";
-}
-
-export function getMonitorBaseUrl(): string | null {
-  return monitorBase === "/api" ? null : monitorBase;
 }
 
 function getCsrfToken(): string {

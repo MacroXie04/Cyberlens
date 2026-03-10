@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 
 import DashboardLayout from "../components/Layout/DashboardLayout";
-import LiveMonitorPage from "../pages/LiveMonitorPage";
 import SettingsPage from "../pages/SettingsPage";
 import SupplyChainPage from "../pages/SupplyChainPage";
 import { getGitHubStatus } from "../features/supply-chain/api";
 import { getSettings } from "../features/settings/api";
 import type { AuthUser } from "../features/auth/types";
 import type { GitHubUser, SelectedProject } from "../features/supply-chain/types";
-import { setMonitorBaseUrl } from "../shared/api/client";
 
-type Tab = "monitor" | "supply-chain" | "settings";
+type Tab = "supply-chain" | "settings";
 
 interface Props {
   authUser: AuthUser;
@@ -19,7 +17,7 @@ interface Props {
 
 export default function DashboardShell({ authUser, onLogout }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>(
-    () => (sessionStorage.getItem("activeTab") as Tab) || "monitor"
+    () => (sessionStorage.getItem("activeTab") as Tab) || "supply-chain"
   );
   const [user, setUser] = useState<GitHubUser | null>(null);
   const [selectedProject, setSelectedProject] = useState<SelectedProject>(() => {
@@ -33,7 +31,6 @@ export default function DashboardShell({ authUser, onLogout }: Props) {
   const [adkKeySet, setAdkKeySet] = useState(false);
   const [adkKeyPreview, setAdkKeyPreview] = useState("");
   const [geminiModel, setGeminiModel] = useState("");
-  const [cloudRunUrl] = useState<string | null>(() => sessionStorage.getItem("cloudRunUrl"));
 
   useEffect(() => {
     sessionStorage.setItem("activeTab", activeTab);
@@ -46,15 +43,6 @@ export default function DashboardShell({ authUser, onLogout }: Props) {
       sessionStorage.removeItem("selectedProject");
     }
   }, [selectedProject]);
-
-  useEffect(() => {
-    setMonitorBaseUrl(cloudRunUrl);
-    if (cloudRunUrl) {
-      sessionStorage.setItem("cloudRunUrl", cloudRunUrl);
-      return;
-    }
-    sessionStorage.removeItem("cloudRunUrl");
-  }, [cloudRunUrl]);
 
   useEffect(() => {
     getGitHubStatus()
@@ -83,13 +71,10 @@ export default function DashboardShell({ authUser, onLogout }: Props) {
       onTabChange={setActiveTab}
       selectedProject={selectedProject}
       adkKeySet={adkKeySet}
-      cloudRunUrl={cloudRunUrl}
       authUser={authUser}
       onLogout={onLogout}
     >
-      {activeTab === "monitor" ? (
-        <LiveMonitorPage cloudRunUrl={cloudRunUrl} />
-      ) : activeTab === "supply-chain" ? (
+      {activeTab === "supply-chain" ? (
         <SupplyChainPage selectedProject={selectedProject} />
       ) : (
         <SettingsPage

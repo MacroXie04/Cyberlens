@@ -18,7 +18,6 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     "accounts",
-    "monitor",
     "scanner",
 ]
 

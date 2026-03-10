@@ -6,7 +6,7 @@ from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 
-from monitor.services.redis_publisher import publish_adk_trace_stream
+from cyberlens.redis_publisher import publish_adk_trace_stream
 from scanner.models import AdkTraceEvent, GitHubScan
 
 MAX_TEXT_PREVIEW = 2000
