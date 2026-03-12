@@ -3,13 +3,13 @@ from django.utils import timezone
 from scanner.models import AdkTraceEvent, CodeScanCandidate, GitHubScan
 
 from ..adk_trace import clip_text_preview, record_phase_metric, record_trace_event, update_scan_phase
-from .candidates import generate_candidates
-from .evidence import build_evidence_packs
-from .inventory import create_file_indexes
+from .analysis.candidates import generate_candidates
+from .analysis.evidence import build_evidence_packs
+from .preparation.inventory import create_file_indexes
 from .progress import publish_token_update
-from .summarization import summarize_chunks
-from .synthesis import run_repo_synthesis
-from .verification import verify_candidates
+from .preparation.summarization import summarize_chunks
+from .analysis.synthesis import run_repo_synthesis
+from .analysis.verification import verify_candidates
 
 
 def run_code_scan_pipeline_service(scan_id: int, source_files: dict[str, str], profile, user_id: int | None, model_name: str, api_key: str, run_structured_agent, publish_stream) -> None:

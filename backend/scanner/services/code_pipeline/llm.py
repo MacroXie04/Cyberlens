@@ -4,7 +4,7 @@ from google.adk import Agent
 from google.adk.models.google_llm import Gemini
 from google.genai import Client, types
 
-from .schemas import CANDIDATE_GENERATION_INSTRUCTION, CHUNK_SUMMARY_INSTRUCTION, REPO_SYNTHESIS_INSTRUCTION, VERIFICATION_INSTRUCTION, CandidateBatch, ChunkSummary, RepoSynthesisReport, VerificationDecision
+from .preparation.schemas import CANDIDATE_GENERATION_INSTRUCTION, CHUNK_SUMMARY_INSTRUCTION, REPO_SYNTHESIS_INSTRUCTION, VERIFICATION_INSTRUCTION, CandidateBatch, ChunkSummary, RepoSynthesisReport, VerificationDecision
 
 
 class ScopedGemini(Gemini):

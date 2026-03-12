@@ -1,20 +1,20 @@
 import AdkPipelineView from "../../../components/SupplyChain/AdkPipelineView";
-import AgentActivityPanel from "../../../components/SupplyChain/AgentActivityPanel";
-import AgentRequestLog from "../../../components/SupplyChain/AgentRequestLog";
-import CodeScanLiveView from "../../../components/SupplyChain/CodeScanLiveView";
-import CodeSecurityFindings from "../../../components/SupplyChain/CodeSecurityFindings";
-import DependencyInventory from "../../../components/SupplyChain/DependencyInventory";
-import DependencyList from "../../../components/SupplyChain/DependencyList";
-import DependencyTree from "../../../components/SupplyChain/DependencyTree";
+import AgentActivityPanel from "../../../components/SupplyChain/agent-panel/AgentActivityPanel";
+import AgentRequestLog from "../../../components/SupplyChain/agent-log/AgentRequestLog";
+import CodeScanLiveView from "../../../components/SupplyChain/code-scan/CodeScanLiveView";
+import CodeSecurityFindings from "../../../components/SupplyChain/code-findings/CodeSecurityFindings";
+import DependencyInventory from "../../../components/SupplyChain/inventory/DependencyInventory";
+import DependencyList from "../../../components/SupplyChain/dependencies/DependencyList";
+import DependencyTree from "../../../components/SupplyChain/dependencies/DependencyTree";
 import ScanProgress from "../../../components/SupplyChain/ScanProgress";
-import VulnerabilityList from "../../../components/SupplyChain/VulnerabilityList";
-import AiRemediationReport from "../../../components/SupplyChain/AiRemediationReport";
+import VulnerabilityList from "../../../components/SupplyChain/vulnerabilities/VulnerabilityList";
+import AiRemediationReport from "../../../components/SupplyChain/remediation/AiRemediationReport";
 import type { SelectedProject } from "../types";
-import OverviewTab from "../components/OverviewTab";
-import ResultTabs from "../components/ResultTabs";
-import ScanHistoryPanel from "../components/ScanHistoryPanel";
-import SupplyChainHeader from "../components/SupplyChainHeader";
-import { IdleState, InlineScanNotice, NoProjectState } from "../components/SupplyChainStates";
+import OverviewTab from "../components/layout/OverviewTab";
+import ResultTabs from "../components/layout/ResultTabs";
+import ScanHistoryPanel from "../components/layout/ScanHistoryPanel";
+import SupplyChainHeader from "../components/layout/SupplyChainHeader";
+import { IdleState, InlineScanNotice, NoProjectState } from "../components/layout/SupplyChainStates";
 import { useSupplyChainScan } from "../hooks/useSupplyChainScan";
 
 interface Props {

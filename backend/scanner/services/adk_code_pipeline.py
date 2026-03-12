@@ -4,12 +4,12 @@ from cyberlens.redis_publisher import publish_code_scan_stream
 from scanner.models import GitHubScan
 
 from .code_pipeline import CandidateBatch, CandidateSpec, ChunkSummary, FAST_SCAN_PROFILE, FULL_SCAN_PROFILE, RepoSynthesisReport, VerificationDecision, get_runtime_scan_profile, get_scan_profile
-from .code_pipeline.inventory import reset_code_scan_state, select_source_files
+from .code_pipeline.preparation.inventory import reset_code_scan_state, select_source_files
 from .code_pipeline.llm import build_llm_model, resolve_model_name
 from .code_pipeline.orchestrator import run_code_scan_pipeline_service
 from .code_pipeline.progress import record_code_inventory_terminal_warning
 from .code_pipeline.runner import run_structured_agent as _run_structured_agent_impl
-from .github_client import get_source_files as get_github_source_files
+from .clients.github_client import get_source_files as get_github_source_files
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ def scan_code_security_github(scan_id: int, pat: str, repo_full_name: str, user_
 
 
 def scan_code_security(scan_id: int, dir_path: str, user_id: int | None = None) -> None:
-    from .local_client import get_source_files as get_local_source_files
+    from .clients.local_client import get_source_files as get_local_source_files
 
     scan, profile, api_key, model_name, probe_fn = _prepare_scan_context(scan_id, user_id)
     if not _handle_scan_prerequisites(scan, api_key, probe_fn):

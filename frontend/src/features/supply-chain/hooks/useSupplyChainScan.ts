@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useSocket } from "../../../hooks/useSocket";
-import { deriveAgentActivity } from "../../../components/SupplyChain/activity";
+import { deriveAgentActivity } from "../../../components/SupplyChain/activity/activity";
 import { getAdkTraceSnapshot, getAiReport, getCodeFindings, getScanHistory, getScanResults, triggerScan } from "../api";
 import { scanToHistoryItem, severityCounts, upsertHistoryItem } from "../lib/history";
 import { emptyTraceSnapshot, mergeTraceEvent, TRACE_PHASE_LABELS } from "../lib/traceSnapshot";

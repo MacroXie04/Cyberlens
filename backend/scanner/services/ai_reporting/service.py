@@ -3,9 +3,9 @@ import logging
 from django.utils import timezone
 
 from .agent import run_report_agent
-from .context import build_report_input, collect_vulnerability_data
-from .input_stage import record_dependency_input_stage, reset_dependency_report_state
-from .report_stage import (
+from .stages.context import build_report_input, collect_vulnerability_data
+from .stages.input_stage import record_dependency_input_stage, reset_dependency_report_state
+from .stages.report_stage import (
     create_clean_report,
     mark_api_probe_failure,
     mark_missing_api_key,

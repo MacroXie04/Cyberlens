@@ -8,15 +8,15 @@ from rest_framework.decorators import api_view
 
 from cyberlens.utils import get_google_api_key, probe_gemini_api_connection
 
-from .api.common import get_user_settings as _get_user_settings
+from .api import get_user_settings as _get_user_settings
 from .api.github_auth import connect_response, disconnect_response, github_status_response, repos_response
 from .api.scan_results import adk_trace_response, ai_report_response, code_findings_response, scan_detail_response
 from .api.scan_runs import local_projects_response, local_scan_response, scan_response, scans_response
 from .api.settings import available_models_response, settings_response, test_api_key_response
 from .services.adk_trace import build_trace_snapshot
-from .services.github_client import list_repos, validate_token
-from .services.local_client import list_local_projects, validate_local_path
-from .services.osv_scanner import run_full_scan, run_local_scan
+from .services.clients.github_client import list_repos, validate_token
+from .services.clients.local_client import list_local_projects, validate_local_path
+from .services.scanning.osv_scanner import run_full_scan, run_local_scan
 
 logger = logging.getLogger(__name__)
 
