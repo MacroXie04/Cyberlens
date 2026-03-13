@@ -52,15 +52,32 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "cyberlens.wsgi.application"
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-        "OPTIONS": {
-            "timeout": int(os.getenv("SQLITE_TIMEOUT_SECONDS", "20")),
-        },
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+if DATABASE_URL:
+    # Parse postgresql://user:password@host:port/dbname
+    from urllib.parse import urlparse
+
+    _db = urlparse(DATABASE_URL)
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": _db.path.lstrip("/"),
+            "USER": _db.username or "",
+            "PASSWORD": _db.password or "",
+            "HOST": _db.hostname or "localhost",
+            "PORT": str(_db.port or 5432),
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+            "OPTIONS": {
+                "timeout": int(os.getenv("SQLITE_TIMEOUT_SECONDS", "20")),
+            },
+        }
+    }
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -77,5 +94,9 @@ USE_TZ = True
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-NGINX_LOG_PATH = os.getenv("NGINX_LOG_PATH", "/var/log/nginx/access.json")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+
+REDIS_URL = os.getenv("REDIS_URL", "")
+if REDIS_URL:
+    CELERY_BROKER_URL = REDIS_URL
+    CELERY_RESULT_BACKEND = REDIS_URL

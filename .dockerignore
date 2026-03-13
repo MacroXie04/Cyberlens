@@ -1,0 +1,13 @@
+node_modules
+__pycache__
+*.pyc
+.git
+venv
+.venv
+db.sqlite3
+.env
+.idea
+.vscode
+*.egg-info
+dist
+build

@@ -1,0 +1,52 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cyberlens}
+      POSTGRES_USER: ${POSTGRES_USER:-cyberlens}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cyberlens_dev}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: ./backend
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - db
+      - redis
+    environment:
+      LOCAL_SCAN_ROOT: /scan-targets
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src
+    depends_on:
+      - backend
+      - realtime
+
+  realtime:
+    build: ./realtime
+    env_file: .env
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./realtime/src:/app/src
+    depends_on:
+      - redis
+
+volumes:
+  pgdata:

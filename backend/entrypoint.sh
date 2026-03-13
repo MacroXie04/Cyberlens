@@ -1,9 +1,23 @@
-#!/bin/sh
+#!/bin/bash
 set -e
 
-if [ "${RUN_DB_MIGRATIONS:-0}" = "1" ]; then
-  echo "Running migrations..."
-  python manage.py migrate --noinput
-fi
+echo "Waiting for PostgreSQL..."
+while ! python -c "
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(1)
+s.connect(('db', 5432))
+s.close()
+" 2>/dev/null; do
+  sleep 1
+done
+echo "PostgreSQL is ready."
 
-exec "$@"
+echo "Running migrations..."
+python manage.py migrate --noinput
+
+echo "Creating superuser (if not exists)..."
+python manage.py createsuperuser --noinput 2>/dev/null || true
+
+echo "Starting Django dev server..."
+exec python manage.py runserver 0.0.0.0:8000

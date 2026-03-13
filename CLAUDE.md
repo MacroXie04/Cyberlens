@@ -53,7 +53,7 @@ npm start          # node dist/index.js
 cd backend
 pytest                          # all tests
 pytest scanner/tests/           # scanner app tests
-pytest scanner/tests/test_views.py  # single test file
+pytest scanner/tests/views/     # views tests only
 pytest -k test_scan_detail      # single test by name
 
 # Frontend (vitest + type check)
@@ -79,18 +79,39 @@ Frontend ←── Socket.IO ←── Realtime ←── Redis pub/sub ←─�
     └── REST API calls (/api/*) ──────────────────────────────┘
 ```
 
-### Backend Apps
+### Backend Structure
 
-**`scanner/`** — Dependency vulnerability + code security scanning
-- Models: `GitHubScan` → `Dependency` → `Vulnerability`, plus `AiReport` (1:1) and `CodeFinding` (1:N)
-- ADK pipeline models: `AdkTraceEvent`, `CodeScanFileIndex`, `CodeScanChunk`, `CodeScanCandidate`
-- Supports GitHub repos (via PAT in Django session) and local directories (validated against `LOCAL_SCAN_ROOT`)
-- `services/dependency_parser.py`: Parses package.json, requirements.txt, pyproject.toml, go.mod, Gemfile
-- `services/osv_scanner.py`: Celery tasks `run_full_scan` / `run_local_scan` — queries OSV API, creates records, triggers AI report + code scan
-- `services/ai_reporter.py`: Generates security scores and remediation via Gemini
-- `services/adk_code_pipeline.py`: Multi-stage AI code analysis — inventory → chunking → summarization → 7 risk passes → candidate generation → evidence expansion → verification → repo synthesis
-- `services/code_scanner.py`: AI-powered source code security analysis
-- `services/github_client.py` / `local_client.py`: File fetching with extension filtering, size limits (50KB), skip dirs (node_modules, .git, etc.)
+The backend uses a domain-based directory structure within the `scanner/` app:
+
+**Models** (`scanner/models/`) — split by domain:
+- `scan.py`: `GitHubScan`, `AiReport` (1:1 with scan)
+- `dependency.py`: `Dependency`, `Vulnerability`, `CodeFinding`
+- `trace.py`: `AdkTraceEvent`, `CodeScanFileIndex`, `CodeScanChunk`, `CodeScanCandidate`
+- `codemap.py`: `CodeMapNode`, `CodeMapEdge`
+
+**API layer** (`scanner/api/`) — views organized by concern:
+- `github_auth.py`: GitHub PAT status/connect/disconnect/repos
+- `scan_runs.py`: scan initiation and listing
+- `scan_results.py`: AI report, code findings, ADK trace results
+- `code_map.py`: code map data
+- `settings.py`: user settings endpoints
+
+**Services** (`scanner/services/`) — organized into subdirectories:
+- `clients/`: `github_client.py`, `local_client.py` — file fetching with extension filtering, size limits (50KB), skip dirs
+- `scanning/`: `dependency_parser.py` (parses package.json, requirements.txt, pyproject.toml, go.mod, Gemfile), `osv_scanner.py` (Celery tasks `run_full_scan`/`run_local_scan`)
+- `ai_reporting/stages/`: multi-stage AI report generation via Gemini
+- `adk_trace/`: trace event handling
+- `code_pipeline/`: multi-stage AI code analysis pipeline
+  - `preparation/`: inventory, profiles, summarization, codemap
+  - `analysis/`: candidates, evidence, synthesis, verification
+  - `orchestrator.py`: main pipeline orchestration
+  - `llm.py`, `runner.py`, `progress.py`: shared pipeline infrastructure
+- `adk_code_pipeline.py`: facade that delegates to `code_pipeline/`
+
+**Serializers** (`scanner/serializers/`) — split to match models: `core.py`, `scan.py`, `trace.py`, `codemap.py`
+
+**Tests** (`scanner/tests/`) — organized by domain:
+- `clients/`, `code_scanner/`, `services/`, `views/`
 
 **`accounts/`** — User auth and per-user settings
 - `UserSettings` (1:1 with User): google_api_key, github_pat, gemini_model
@@ -104,13 +125,26 @@ Frontend ←── Socket.IO ←── Realtime ←── Redis pub/sub ←─�
 
 ### Frontend Structure
 
-- `App.tsx`: Two-tab layout — Code Scan, Settings
-- `services/api.ts`: REST client with auto CSRF token injection
-- `hooks/useSocket.ts`: Socket.IO hook for real-time events (listens to 4 scanner Redis channels)
-- `theme/theme.ts`: Material You (M3) design tokens
-- `types/index.ts`: All TypeScript interfaces (auth, scanner, settings types)
-- `pages/SupplyChainPage.tsx`: D3 dependency tree + vulnerability list + AI remediation report + code findings + ADK pipeline trace
-- `pages/SettingsPage.tsx`: API key, GitHub PAT, project selection
+The frontend uses a feature-based directory structure under `src/`:
+
+**`app/`** — Shell and routing
+- `router.tsx`: Routes — login, register, dashboard
+- `DashboardShell.tsx`: Two-tab layout (Supply Chain, Settings)
+
+**`features/`** — Domain modules, each with `api/`, `components/`, `hooks/`, `lib/`, `pages/`, `types/`:
+- `supply-chain/`: Main scanning feature — SupplyChainPage, scan hooks, pipeline progress, trace snapshots
+- `settings/`: Settings management
+- `auth/`: Login/register flows
+
+**`components/SupplyChain/`** — Shared UI components organized by subdirectory: `activity/`, `agent-panel/`, `agent-log/`, `code-findings/`, `code-scan/`, `dependencies/`, `inventory/`, `remediation/`, `vulnerabilities/`, `code-map/`
+
+**`shared/`** — Cross-feature code (e.g., `shared/api/client.ts` for the base REST client with CSRF injection)
+
+**`services/api.ts`** — Re-export aggregator that combines feature-specific API modules
+
+**`pages/`** — Re-export wrappers pointing to actual implementations in `features/`
+
+**Tests** (`__tests__/`) — organized by domain: `app/`, `auth/`, `services/`, `settings/`, `supply-chain/`
 
 ### Realtime Service
 
