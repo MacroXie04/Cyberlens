@@ -8,6 +8,7 @@ class AdkTraceEvent(models.Model):
     class Phase(models.TextChoices):
         DEPENDENCY_INPUT = "dependency_input", "Dependency Input"
         DEPENDENCY_ADK_REPORT = "dependency_adk_report", "Dependency ADK Report"
+        CODE_MAP = "code_map", "Code Map"
         CODE_INVENTORY = "code_inventory", "Code Inventory"
         CHUNK_SUMMARY = "chunk_summary", "Chunk Summary"
         CANDIDATE_GENERATION = "candidate_generation", "Candidate Generation"

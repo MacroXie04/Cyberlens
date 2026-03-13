@@ -5,6 +5,7 @@ from scanner.models import AdkTraceEvent, CodeScanCandidate, GitHubScan
 from ..adk_trace import clip_text_preview, record_phase_metric, record_trace_event, update_scan_phase
 from .analysis.candidates import generate_candidates
 from .analysis.evidence import build_evidence_packs
+from .preparation.codemap import build_code_map
 from .preparation.inventory import create_file_indexes
 from .progress import publish_token_update
 from .preparation.summarization import summarize_chunks
@@ -15,10 +16,20 @@ from .analysis.verification import verify_candidates
 def run_code_scan_pipeline_service(scan_id: int, source_files: dict[str, str], profile, user_id: int | None, model_name: str, api_key: str, run_structured_agent, publish_stream) -> None:
     scan = GitHubScan.objects.get(id=scan_id)
     scan.code_scan_files_total = len(source_files)
-    scan.code_scan_phase = AdkTraceEvent.Phase.CODE_INVENTORY
+    scan.code_scan_phase = AdkTraceEvent.Phase.CODE_MAP
     scan.save(update_fields=["code_scan_files_total", "code_scan_phase"])
     publish_stream({"scan_id": scan.id, "type": "scan_start", "total_files": len(source_files)})
 
+    # ---- CODE_MAP phase ----
+    map_started = timezone.now()
+    record_trace_event(scan, phase=AdkTraceEvent.Phase.CODE_MAP, kind=AdkTraceEvent.Kind.STAGE_STARTED, status="running", label="Code map", started_at=map_started)
+    update_scan_phase(scan, AdkTraceEvent.Phase.CODE_MAP)
+    map_nodes, map_edges = build_code_map(scan, source_files)
+    map_duration = int((timezone.now() - map_started).total_seconds() * 1000)
+    record_trace_event(scan, phase=AdkTraceEvent.Phase.CODE_MAP, kind=AdkTraceEvent.Kind.STAGE_COMPLETED, status="success", label="Code map completed", duration_ms=map_duration, started_at=map_started, ended_at=timezone.now(), payload_json={"nodes": len(map_nodes), "edges": len(map_edges)})
+    update_scan_phase(scan, AdkTraceEvent.Phase.CODE_MAP, {"nodes": len(map_nodes), "edges": len(map_edges)})
+
+    # ---- CODE_INVENTORY phase ----
     started_at = timezone.now()
     record_trace_event(scan, phase=AdkTraceEvent.Phase.CODE_INVENTORY, kind=AdkTraceEvent.Kind.STAGE_STARTED, status="running", label="Code inventory", started_at=started_at)
     update_scan_phase(scan, AdkTraceEvent.Phase.CODE_INVENTORY)

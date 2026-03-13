@@ -3,6 +3,7 @@ import AgentActivityPanel from "../../../components/SupplyChain/agent-panel/Agen
 import AgentRequestLog from "../../../components/SupplyChain/agent-log/AgentRequestLog";
 import CodeScanLiveView from "../../../components/SupplyChain/code-scan/CodeScanLiveView";
 import CodeSecurityFindings from "../../../components/SupplyChain/code-findings/CodeSecurityFindings";
+import { CodeMapTab } from "../../../components/SupplyChain/code-map";
 import DependencyInventory from "../../../components/SupplyChain/inventory/DependencyInventory";
 import DependencyList from "../../../components/SupplyChain/dependencies/DependencyList";
 import DependencyTree from "../../../components/SupplyChain/dependencies/DependencyTree";
@@ -42,10 +43,12 @@ export default function SupplyChainPage({ selectedProject }: Props) {
 
           {(state.activeScan || state.historyLoading || state.detailLoading || state.hasTrace) && (
             <>
-              <ResultTabs selected={state.resultTab} onChange={state.setResultTab} dependenciesCount={state.dependencies.length} totalVulns={state.totalVulns} findingsCount={state.codeFindings.length} urgentFindings={state.codeFindings.some((finding) => finding.severity === "critical" || finding.severity === "high")} eventsCount={state.adkTrace?.events.length || 0} hasPipelineError={state.adkTrace?.phases.some((phase) => phase.status === "error")} />
+              <ResultTabs selected={state.resultTab} onChange={state.setResultTab} codeMapNodeCount={state.codeMapData?.nodes.length || 0} dependenciesCount={state.dependencies.length} totalVulns={state.totalVulns} findingsCount={state.codeFindings.length} urgentFindings={state.codeFindings.some((finding) => finding.severity === "critical" || finding.severity === "high")} eventsCount={state.adkTrace?.events.length || 0} hasPipelineError={state.adkTrace?.phases.some((phase) => phase.status === "error")} />
               <div style={{ minHeight: 420 }}>
                 {state.detailLoading && !state.activeScan ? <div className="card" style={{ padding: 18, color: "var(--md-on-surface-variant)", fontSize: 13 }}>Loading scan details...</div> : state.resultTab === "overview" ? (
                   <OverviewTab activeScan={state.activeScan} codeSummary={codeSummary} dependencies={state.dependencies} liveCodeFindings={state.codeFindings} report={state.report} vulnerabilitySummary={vulnerabilitySummary} />
+                ) : state.resultTab === "architecture" ? (
+                  <CodeMapTab data={state.codeMapData} loading={state.detailLoading} />
                 ) : state.resultTab === "dependencies" ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>{state.activeScan ? <><DependencyInventory dependencies={state.dependencies} /><DependencyTree dependencies={state.dependencies} /><DependencyList dependencies={state.dependencies} /></> : <InlineScanNotice message="No dependency inventory is available for the selected scan." />}</div>
                 ) : state.resultTab === "vulnerabilities" ? (

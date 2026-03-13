@@ -99,6 +99,30 @@ export interface CodeFinding {
   explanation: string;
 }
 
+export interface CodeMapNode {
+  id: number;
+  node_id: string;
+  node_type: "endpoint" | "view" | "service" | "model" | "component" | "frontend_route" | "middleware" | "utility";
+  label: string;
+  file_path: string;
+  line_number: number;
+  http_methods: string[];
+  metadata_json: Record<string, unknown>;
+}
+
+export interface CodeMapEdge {
+  id: number;
+  source_node_id: string;
+  target_node_id: string;
+  edge_type: "routes_to" | "calls" | "imports" | "renders";
+  label: string;
+}
+
+export interface CodeMapData {
+  nodes: CodeMapNode[];
+  edges: CodeMapEdge[];
+}
+
 export interface CodeScanStreamEvent {
   scan_id: number;
   type:

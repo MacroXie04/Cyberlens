@@ -6,7 +6,7 @@ import SupplyChainPage from "../../pages/SupplyChainPage";
 import { getAdkTraceSnapshot, getScanHistory, getScanResults } from "../../features/supply-chain/api";
 
 vi.mock("../../hooks/useSocket", () => ({ useSocket: () => ({ connected: true, emit: vi.fn() }) }));
-vi.mock("../../features/supply-chain/api", () => ({ triggerScan: vi.fn(), getScanHistory: vi.fn(), getScanResults: vi.fn(), getAiReport: vi.fn(), getCodeFindings: vi.fn(), getAdkTraceSnapshot: vi.fn() }));
+vi.mock("../../features/supply-chain/api", () => ({ triggerScan: vi.fn(), getScanHistory: vi.fn(), getScanResults: vi.fn(), getAiReport: vi.fn(), getCodeFindings: vi.fn(), getAdkTraceSnapshot: vi.fn(), getCodeMap: vi.fn().mockResolvedValue({ nodes: [], edges: [] }) }));
 vi.mock("../../components/SupplyChain/AdkPipelineView", () => ({ default: () => <div>ADK Pipeline Stub</div> }));
 vi.mock("../../components/SupplyChain/agent-panel/AgentActivityPanel", () => ({ default: () => <div>Agent Activity Stub</div> }));
 vi.mock("../../components/SupplyChain/agent-log/AgentRequestLog", () => ({ default: () => <div>Agent Request Log Stub</div> }));
@@ -17,6 +17,7 @@ vi.mock("../../components/SupplyChain/inventory/DependencyInventory", () => ({ d
 vi.mock("../../components/SupplyChain/dependencies/DependencyList", () => ({ default: () => <div>Dependency List Stub</div> }));
 vi.mock("../../components/SupplyChain/dependencies/DependencyTree", () => ({ default: () => <div>Dependency Tree Stub</div> }));
 vi.mock("../../components/SupplyChain/ScanProgress", () => ({ default: () => <div>Scan Progress Stub</div> }));
+vi.mock("../../components/SupplyChain/code-map", () => ({ CodeMapTab: () => <div>Code Map Stub</div> }));
 vi.mock("../../components/SupplyChain/vulnerabilities/VulnerabilityList", () => ({ default: () => <div>Vulnerability List Stub</div> }));
 
 const mockGetScanHistory = vi.mocked(getScanHistory);

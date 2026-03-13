@@ -2,27 +2,27 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useSocket } from "../../../hooks/useSocket";
 import { deriveAgentActivity } from "../../../components/SupplyChain/activity/activity";
-import { getAdkTraceSnapshot, getAiReport, getCodeFindings, getScanHistory, getScanResults, triggerScan } from "../api";
+import { getAdkTraceSnapshot, getAiReport, getCodeFindings, getCodeMap, getScanHistory, getScanResults, triggerScan } from "../api";
 import { scanToHistoryItem, severityCounts, upsertHistoryItem } from "../lib/history";
 import { emptyTraceSnapshot, mergeTraceEvent, TRACE_PHASE_LABELS } from "../lib/traceSnapshot";
-import type { AdkTraceEvent, AdkTraceSnapshot, AiReport, CodeFinding, CodeScanStreamEvent, GitHubScan, GitHubScanHistoryItem, ScanMode, SelectedProject } from "../types";
+import type { AdkTraceEvent, AdkTraceSnapshot, AiReport, CodeFinding, CodeMapData, CodeScanStreamEvent, GitHubScan, GitHubScanHistoryItem, ScanMode, SelectedProject } from "../types";
 import { deriveScanProgress, type ScanProgressStep } from "../../../pages/supplyChainScanProgress";
 
-type ResultTab = "overview" | "dependencies" | "vulnerabilities" | "code" | "pipeline";
+type ResultTab = "overview" | "architecture" | "dependencies" | "vulnerabilities" | "code" | "pipeline";
 
 export function useSupplyChainScan(selectedProject: SelectedProject) {
-  const [scanHistory, setScanHistory] = useState<GitHubScanHistoryItem[]>([]), [selectedScanId, setSelectedScanId] = useState<number | null>(null), [selectedScan, setSelectedScan] = useState<GitHubScan | null>(null), [report, setReport] = useState<AiReport | null>(null), [codeFindings, setCodeFindings] = useState<CodeFinding[]>([]), [scanning, setScanning] = useState(false), [scanMessage, setScanMessage] = useState(""), [scanStep, setScanStep] = useState<ScanProgressStep>(""), [resultTab, setResultTab] = useState<ResultTab>("overview"), [adkTrace, setAdkTrace] = useState<AdkTraceSnapshot | null>(null), [adkTraceLoading, setAdkTraceLoading] = useState(false), [historyLoading, setHistoryLoading] = useState(false), [detailLoading, setDetailLoading] = useState(false), [codeScanStreamEvents, setCodeScanStreamEvents] = useState<CodeScanStreamEvent[]>([]), [codeScanActive, setCodeScanActive] = useState(false);
+  const [scanHistory, setScanHistory] = useState<GitHubScanHistoryItem[]>([]), [selectedScanId, setSelectedScanId] = useState<number | null>(null), [selectedScan, setSelectedScan] = useState<GitHubScan | null>(null), [report, setReport] = useState<AiReport | null>(null), [codeFindings, setCodeFindings] = useState<CodeFinding[]>([]), [scanning, setScanning] = useState(false), [scanMessage, setScanMessage] = useState(""), [scanStep, setScanStep] = useState<ScanProgressStep>(""), [resultTab, setResultTab] = useState<ResultTab>("overview"), [adkTrace, setAdkTrace] = useState<AdkTraceSnapshot | null>(null), [adkTraceLoading, setAdkTraceLoading] = useState(false), [historyLoading, setHistoryLoading] = useState(false), [detailLoading, setDetailLoading] = useState(false), [codeScanStreamEvents, setCodeScanStreamEvents] = useState<CodeScanStreamEvent[]>([]), [codeScanActive, setCodeScanActive] = useState(false), [codeMapData, setCodeMapData] = useState<CodeMapData | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null), selectedScanIdRef = useRef<number | null>(null), lastProjectKeyRef = useRef<string | null>(null), lastRealtimeEventAtRef = useRef(0);
   const repoFullName = selectedProject?.repo.full_name || null;
 
   useEffect(() => { selectedScanIdRef.current = selectedScanId; }, [selectedScanId]);
   const stopPolling = useCallback(() => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } }, []);
-  const resetPageState = useCallback(() => { stopPolling(); selectedScanIdRef.current = null; lastRealtimeEventAtRef.current = 0; setScanHistory([]); setSelectedScanId(null); setSelectedScan(null); setReport(null); setCodeFindings([]); setScanning(false); setScanMessage(""); setScanStep(""); setResultTab("overview"); setAdkTrace(null); setAdkTraceLoading(false); setHistoryLoading(false); setDetailLoading(false); setCodeScanStreamEvents([]); setCodeScanActive(false); }, [stopPolling]);
+  const resetPageState = useCallback(() => { stopPolling(); selectedScanIdRef.current = null; lastRealtimeEventAtRef.current = 0; setScanHistory([]); setSelectedScanId(null); setSelectedScan(null); setReport(null); setCodeFindings([]); setScanning(false); setScanMessage(""); setScanStep(""); setResultTab("overview"); setAdkTrace(null); setAdkTraceLoading(false); setHistoryLoading(false); setDetailLoading(false); setCodeScanStreamEvents([]); setCodeScanActive(false); setCodeMapData(null); }, [stopPolling]);
   const applyHistoryItem = useCallback((item: GitHubScanHistoryItem) => setScanHistory((previous) => upsertHistoryItem(previous, item)), []);
 
   const loadScanData = useCallback(async (scanId: number) => {
     setDetailLoading(true); setAdkTraceLoading(true);
-    const [scanResult, aiReportResult, findingsResult, traceResult] = await Promise.allSettled([getScanResults(scanId), getAiReport(scanId), getCodeFindings(scanId), getAdkTraceSnapshot(scanId)]);
+    const [scanResult, aiReportResult, findingsResult, traceResult, codeMapResult] = await Promise.allSettled([getScanResults(scanId), getAiReport(scanId), getCodeFindings(scanId), getAdkTraceSnapshot(scanId), getCodeMap(scanId)]);
     if (selectedScanIdRef.current !== scanId) { setDetailLoading(false); setAdkTraceLoading(false); return; }
     if (scanResult.status === "fulfilled") {
       const nextScan = scanResult.value; setSelectedScan(nextScan); applyHistoryItem(scanToHistoryItem(nextScan)); setScanning(nextScan.scan_status === "scanning");
@@ -33,6 +33,7 @@ export function useSupplyChainScan(selectedProject: SelectedProject) {
     setReport(aiReportResult.status === "fulfilled" ? aiReportResult.value || null : null);
     setCodeFindings(findingsResult.status === "fulfilled" && Array.isArray(findingsResult.value) ? findingsResult.value : []);
     setAdkTrace(traceResult.status === "fulfilled" ? traceResult.value : emptyTraceSnapshot());
+    setCodeMapData(codeMapResult.status === "fulfilled" && codeMapResult.value ? codeMapResult.value : null);
     setDetailLoading(false); setAdkTraceLoading(false);
   }, [applyHistoryItem]);
 
@@ -62,13 +63,13 @@ export function useSupplyChainScan(selectedProject: SelectedProject) {
   useEffect(() => () => stopPolling(), [stopPolling]);
 
   const selectHistoryItem = useCallback(async (item: GitHubScanHistoryItem) => {
-    selectedScanIdRef.current = item.id; setSelectedScanId(item.id); setSelectedScan(null); setReport(null); setCodeFindings([]); setAdkTrace(null); setCodeScanStreamEvents([]); setCodeScanActive(false); setScanning(item.scan_status === "scanning");
+    selectedScanIdRef.current = item.id; setSelectedScanId(item.id); setSelectedScan(null); setReport(null); setCodeFindings([]); setAdkTrace(null); setCodeScanStreamEvents([]); setCodeScanActive(false); setCodeMapData(null); setScanning(item.scan_status === "scanning");
     item.scan_status === "scanning" ? startPolling(item.id) : stopPolling(); await loadScanData(item.id);
   }, [loadScanData, startPolling, stopPolling]);
 
   const runScan = useCallback(async (scanMode: ScanMode) => {
     if (!repoFullName) return;
-    lastRealtimeEventAtRef.current = 0; setScanning(true); setScanMessage(scanMode === "fast" ? "Starting Fast Scan..." : "Starting Full Scan..."); setScanStep("starting"); setReport(null); setCodeFindings([]); setCodeScanStreamEvents([]); setCodeScanActive(false); setAdkTrace(emptyTraceSnapshot()); setResultTab("pipeline");
+    lastRealtimeEventAtRef.current = 0; setScanning(true); setScanMessage(scanMode === "fast" ? "Starting Fast Scan..." : "Starting Full Scan..."); setScanStep("starting"); setReport(null); setCodeFindings([]); setCodeScanStreamEvents([]); setCodeScanActive(false); setCodeMapData(null); setAdkTrace(emptyTraceSnapshot()); setResultTab("pipeline");
     try {
       const created = await triggerScan(repoFullName, scanMode); applyHistoryItem(scanToHistoryItem(created)); selectedScanIdRef.current = created.id; setSelectedScanId(created.id); setSelectedScan(created); setScanning(true); startPolling(created.id); await loadScanData(created.id);
     } catch (error) { const message = error instanceof Error ? error.message : "Scan failed"; setScanning(false); setScanStep("failed"); setScanMessage(message); }
@@ -89,5 +90,5 @@ export function useSupplyChainScan(selectedProject: SelectedProject) {
   const scoreColor = (activeScan?.security_score ?? 0) >= 80 ? "var(--md-safe)" : (activeScan?.security_score ?? 0) >= 50 ? "var(--md-warning)" : "var(--md-error)";
   const isIdle = Boolean(selectedProject) && !historyLoading && scanHistory.length === 0 && !activeScan && !scanning, hasTrace = Boolean(adkTrace?.events.length);
 
-  return { activeScan, activity, adkTrace, adkTraceLoading, codeAgentRequests, codeCounts, codeFindings: liveCodeFindings, codeScanActive, codeScanStreamEvents, dependencies, detailLoading, hasTrace, historyLoading, isIdle, report, resultTab, scanHistory, scanMessage, scanStep, scanning, scoreColor, selectHistoryItem, selectedHistoryItem, selectedScanId, setResultTab, totalVulns, runScan, vulnerabilityCounts };
+  return { activeScan, activity, adkTrace, adkTraceLoading, codeAgentRequests, codeCounts, codeFindings: liveCodeFindings, codeMapData, codeScanActive, codeScanStreamEvents, dependencies, detailLoading, hasTrace, historyLoading, isIdle, report, resultTab, scanHistory, scanMessage, scanStep, scanning, scoreColor, selectHistoryItem, selectedHistoryItem, selectedScanId, setResultTab, totalVulns, runScan, vulnerabilityCounts };
 }

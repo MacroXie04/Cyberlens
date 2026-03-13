@@ -27,6 +27,7 @@ export interface VerificationOutcome {
 export const PHASE_ORDER = [
   "dependency_input",
   "dependency_adk_report",
+  "code_map",
   "code_inventory",
   "chunk_summary",
   "candidate_generation",
@@ -38,6 +39,7 @@ export const PHASE_ORDER = [
 export const PHASE_LABELS: Record<AdkTracePhase, string> = {
   dependency_input: "Dependency Input",
   dependency_adk_report: "Dependency ADK Report",
+  code_map: "Code Map",
   code_inventory: "Code Inventory",
   chunk_summary: "Chunk Summary",
   candidate_generation: "Candidate Generation",

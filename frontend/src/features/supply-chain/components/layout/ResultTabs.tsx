@@ -1,4 +1,4 @@
-type ResultTab = "overview" | "dependencies" | "vulnerabilities" | "code" | "pipeline";
+type ResultTab = "overview" | "architecture" | "dependencies" | "vulnerabilities" | "code" | "pipeline";
 
 function TabButton({ active, onClick, label, count, alert }: { active: boolean; onClick: () => void; label: string; count?: number; alert?: boolean; }) {
   return (
@@ -10,6 +10,7 @@ function TabButton({ active, onClick, label, count, alert }: { active: boolean; 
 }
 
 interface Props {
+  codeMapNodeCount: number;
   dependenciesCount: number;
   eventsCount: number;
   findingsCount: number;
@@ -20,10 +21,11 @@ interface Props {
   urgentFindings: boolean;
 }
 
-export default function ResultTabs({ dependenciesCount, eventsCount, findingsCount, hasPipelineError, onChange, selected, totalVulns, urgentFindings }: Props) {
+export default function ResultTabs({ codeMapNodeCount, dependenciesCount, eventsCount, findingsCount, hasPipelineError, onChange, selected, totalVulns, urgentFindings }: Props) {
   return (
     <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--md-outline-variant)", flexWrap: "wrap" }}>
       <TabButton active={selected === "overview"} onClick={() => onChange("overview")} label="Overview" />
+      <TabButton active={selected === "architecture"} onClick={() => onChange("architecture")} label="Architecture" count={codeMapNodeCount || undefined} />
       <TabButton active={selected === "dependencies"} onClick={() => onChange("dependencies")} label="Dependencies" count={dependenciesCount} />
       <TabButton active={selected === "vulnerabilities"} onClick={() => onChange("vulnerabilities")} label="Vulnerabilities" count={totalVulns} alert={totalVulns > 0} />
       <TabButton active={selected === "code"} onClick={() => onChange("code")} label="Code Security" count={findingsCount} alert={urgentFindings} />

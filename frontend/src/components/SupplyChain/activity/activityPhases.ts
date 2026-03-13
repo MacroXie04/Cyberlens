@@ -10,6 +10,7 @@ import { isRecord, readNumber, readString } from "./activityReaders";
 export const PHASE_LABELS: Record<AdkTracePhase, string> = {
   dependency_input: "Dependency Input",
   dependency_adk_report: "Dependency ADK Report",
+  code_map: "Code Map",
   code_inventory: "Code Inventory",
   chunk_summary: "Chunk Summary",
   candidate_generation: "Candidate Generation",
@@ -110,6 +111,16 @@ export function describePhase(
           score != null
             ? "Executive summary and remediation priorities are ready."
             : "Reviewing vulnerability batches and ranking fixes.",
+        updated_at: updatedAt,
+      };
+    }
+    case "code_map": {
+      const nodes = readNumber(metric, "nodes") ?? 0;
+      const edges = readNumber(metric, "edges") ?? 0;
+      return {
+        title: "Building architecture map",
+        subject: nodes > 0 ? `${nodes} nodes, ${edges} edges` : "Code map",
+        progress_text: nodes > 0 ? `Mapped ${nodes} code elements with ${edges} connections.` : "Analyzing project structure and call chains.",
         updated_at: updatedAt,
       };
     }

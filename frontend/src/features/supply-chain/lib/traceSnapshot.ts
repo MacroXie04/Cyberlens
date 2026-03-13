@@ -3,6 +3,7 @@ import type { AdkArtifactSummary, AdkTraceEvent, AdkTracePhase, AdkTracePhaseSum
 export const TRACE_PHASE_LABELS: Record<AdkTracePhase, string> = {
   dependency_input: "Dependency Input",
   dependency_adk_report: "Dependency ADK Report",
+  code_map: "Code Map",
   code_inventory: "Code Inventory",
   chunk_summary: "Chunk Summary",
   candidate_generation: "Candidate Generation",
@@ -11,7 +12,7 @@ export const TRACE_PHASE_LABELS: Record<AdkTracePhase, string> = {
   repo_synthesis: "Repo Synthesis",
 };
 
-export const TRACE_PHASE_ORDER: AdkTracePhase[] = ["dependency_input", "dependency_adk_report", "code_inventory", "chunk_summary", "candidate_generation", "evidence_expansion", "verification", "repo_synthesis"];
+export const TRACE_PHASE_ORDER: AdkTracePhase[] = ["dependency_input", "dependency_adk_report", "code_map", "code_inventory", "chunk_summary", "candidate_generation", "evidence_expansion", "verification", "repo_synthesis"];
 
 const EMPTY_ARTIFACTS: AdkArtifactSummary = { candidates: [], evidence_packs: [], verified_findings: [], dependency_report_batches: [] };
 

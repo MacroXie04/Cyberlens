@@ -3,6 +3,7 @@ import type { AdkTracePhase, AdkTracePhaseSummary } from "../../../types";
 export const PHASE_ORDER: AdkTracePhase[] = [
   "dependency_input",
   "dependency_adk_report",
+  "code_map",
   "code_inventory",
   "chunk_summary",
   "candidate_generation",
@@ -14,6 +15,7 @@ export const PHASE_ORDER: AdkTracePhase[] = [
 export const PHASE_SHORT_LABELS: Record<AdkTracePhase, string> = {
   dependency_input: "Deps In",
   dependency_adk_report: "Deps ADK",
+  code_map: "Code Map",
   code_inventory: "Inventory",
   chunk_summary: "Chunks",
   candidate_generation: "Candidates",

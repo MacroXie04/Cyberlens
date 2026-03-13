@@ -3,6 +3,7 @@ import type {
   AdkTraceSnapshot,
   AiReport,
   CodeFinding,
+  CodeMapData,
   GitHubRepo,
   GitHubScan,
   GitHubScanHistoryItem,
@@ -49,3 +50,6 @@ export const getCodeFindings = (id: number) =>
 
 export const getAdkTraceSnapshot = (id: number) =>
   fetchJson<AdkTraceSnapshot>(`${LOCAL_BASE}/github/scan/${id}/adk-trace/`);
+
+export const getCodeMap = (id: number) =>
+  fetchJson<CodeMapData>(`${LOCAL_BASE}/github/scan/${id}/code-map/`);

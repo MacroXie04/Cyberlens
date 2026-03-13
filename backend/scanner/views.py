@@ -10,6 +10,7 @@ from cyberlens.utils import get_google_api_key, probe_gemini_api_connection
 
 from .api import get_user_settings as _get_user_settings
 from .api.github_auth import connect_response, disconnect_response, github_status_response, repos_response
+from .api.code_map import code_map_response
 from .api.scan_results import adk_trace_response, ai_report_response, code_findings_response, scan_detail_response
 from .api.scan_runs import local_projects_response, local_scan_response, scan_response, scans_response
 from .api.settings import available_models_response, settings_response, test_api_key_response
@@ -108,6 +109,11 @@ def code_findings(request, scan_id):
 @api_view(["GET"])
 def adk_trace(request, scan_id):
     return adk_trace_response(request, scan_id, build_trace_snapshot=build_trace_snapshot)
+
+
+@api_view(["GET"])
+def code_map(request, scan_id):
+    return code_map_response(request, scan_id)
 
 
 @api_view(["GET", "PUT"])

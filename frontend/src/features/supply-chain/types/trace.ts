@@ -1,6 +1,7 @@
 export type AdkTracePhase =
   | "dependency_input"
   | "dependency_adk_report"
+  | "code_map"
   | "code_inventory"
   | "chunk_summary"
   | "candidate_generation"
